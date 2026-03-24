@@ -553,6 +553,17 @@ void Game::generate_asteroid_field(const Vec2 &center, double radius,
   }
 }
 
+void Game::generate_asteroid_field(double density, double min_mass,
+                                   double max_mass, double min_momentum,
+                                   double max_momentum) {
+  const Vec2 center{0.0, 0.0};
+  const double radius =
+      std::sqrt(cfg().world.half_width * cfg().world.half_width +
+                cfg().world.half_height * cfg().world.half_height);
+  generate_asteroid_field(center, radius, density, min_mass, max_mass,
+                          min_momentum, max_momentum);
+}
+
 void Game::remove_asteroids(const Vec2 &center, double radius) {
   if (radius <= 0.0) {
     return;

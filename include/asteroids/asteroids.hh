@@ -55,7 +55,7 @@ struct BulletConfig {
 struct AsteroidConfig {
   double radius_per_sqrt_mass = 0.5;
   double min_mass = 100.0;
-  double fracture_energy_per_mass = 1000.0;
+  double fracture_energy_per_mass = 700.0;
   double elastic_restitution = 0.5;
   double split_impulse_scale = 0.1;
   double merge_speed_threshold = 75.0;
@@ -225,6 +225,8 @@ class Game {
                          double min_momentum, double max_momentum);
   void generate_asteroid_field(const Vec2 &center, double radius,
                                double density, double min_mass, double max_mass,
+                               double min_momentum, double max_momentum);
+  void generate_asteroid_field(double density, double min_mass, double max_mass,
                                double min_momentum, double max_momentum);
   void remove_asteroids(const Vec2 &center, double radius);
 

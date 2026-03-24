@@ -805,13 +805,7 @@ void Renderer::render(const Game &game) {
 
   // Asteroids
   for (const Asteroid &asteroid : space.asteroids()) {
-#if AST_DEBUG_STRESS_GRADIENT
-    const double stress = std::clamp(asteroid.stress, 0.0, 1.0);
-    const Uint8 value = static_cast<Uint8>(std::lround(80.0 + stress * 175.0));
-    SDL_SetRenderDrawColor(state_->renderer, value, value, value, 255);
-#else
     SDL_SetRenderDrawColor(state_->renderer, 255, 255, 255, 255);
-#endif
     const auto [x, y] = to_screen(asteroid.pos);
     const int r =
         std::max(cfg().render.min_draw_radius_px,

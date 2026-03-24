@@ -25,19 +25,28 @@
 
 // Times are in seconds, angles in radians, distances and masses in arbitrary
 // units.
-#define AST_WORLD_HALF_WIDTH 500.0
-#define AST_WORLD_HALF_HEIGHT 500.0
-#define AST_G 10
-#define AST_EPS 0.5  // Softening to prevent singularities
+#define AST_WORLD_HALF_WIDTH 2000.0
+#define AST_WORLD_HALF_HEIGHT 2000.0
+#define AST_G 20.0
+#define AST_EPS 1.0  // Softening to prevent singularities
 #define AST_ESPLOSION_LIFETIME 0.35
-#define AST_SHIP_THRUST_FORWARD 40.0
-#define AST_SHIP_THRUST_BACKWARD 30.0
-#define AST_SHIP_ROTATION_SPEED 2.5
-#define AST_BULLET_SPEED 130.0
+#define AST_SHIP_THRUST_FORWARD 75.0
+#define AST_SHIP_THRUST_BACKWARD 40.0
+#define AST_SHIP_ROTATION_SPEED 3.0
+#define AST_BULLET_SPEED 150.0
 #define AST_BULLET_LIFETIME 3.0
+#define AST_BULLET_MASS 20.0
+#define AST_BULLET_STRESS 0.2
 #define AST_RADIUS_PER_SQRT_MASS 0.5  // Radius per square root of mass
 #define AST_SHIP_RADIUS 20.0
 #define AST_SHIP_GRAVITY true  // Ship is affected by asteroid gravity
+#define AST_MIN_ASTEROID_MASS 100.0
+#define AST_ASTEROID_FRACTURE_ENERGY_PER_MASS 1000.0
+#define AST_ASTEROID_MERGE_SPEED_THRESHOLD 75.0
+#define AST_ASTEROID_SPLIT_IMPULSE_SCALE 0.2
+#define AST_EXPLOSION_SCALE 0.5
+#define AST_ASTEROID_ELASTIC_RESTITUTION 0.5
+#define AST_ASTEROID_STRESS_DECAY 0.05  // Stress healing per second
 
 #define AST_WORLD_WIDTH (2.0 * AST_WORLD_HALF_WIDTH)
 #define AST_WORLD_HEIGHT (2.0 * AST_WORLD_HALF_HEIGHT)
@@ -88,6 +97,7 @@ struct Asteroid {
   double mass;
   double radius = 0.0;
   int id = 0;
+  double stress = 0.0;
 };
 
 struct Ship {

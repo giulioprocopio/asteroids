@@ -10,6 +10,8 @@
 #include <utility>
 #include <vector>
 
+#define ZERO_TOLERANCE 1e-9
+
 namespace {
 
 uint32_t hash_u32(uint32_t value) {
@@ -55,8 +57,8 @@ std::vector<Vec2> compute_asteroid_accelerations(
 // Gravitational acceleration on a single point from all asteroids.
 Vec2 compute_ship_acceleration(const Vec2 &pos,
                                std::span<const Asteroid> asteroids) {
+  Vec2 acc{0.0, 0.0};
   if constexpr (AST_SHIP_GRAVITY) {
-    Vec2 acc{0.0, 0.0};
     for (const auto &a : asteroids) {
       const Vec2 d = a.pos - pos;
       const double d2 = dot(d, d) + AST_EPS * AST_EPS;
@@ -64,8 +66,104 @@ Vec2 compute_ship_acceleration(const Vec2 &pos,
       const double inv_d3 = inv_d * inv_d * inv_d;
       acc += d * (AST_G * a.mass * inv_d3);
     }
-    return acc;
   }
+  return acc;
+}
+
+std::vector<Asteroid> fragment_asteroid(const Asteroid &a, std::mt19937 &rng) {
+  std::vector<Asteroid> fragments;
+
+  std::discrete_distribution<int> count_dist({50, 30, 15, 5});
+  int count = count_dist(rng) + 2;
+
+  std::vector<double> props(count);
+  std::uniform_real_distribution<double> prop_dist(0.3, 1.0);
+  double total_prop = 0.0;
+  for (int i = 0; i < count; ++i) {
+    props[i] = prop_dist(rng);
+    total_prop += props[i];
+  }
+
+  std::vector<double> masses(count);
+  for (int i = 0; i < count; ++i) {
+    masses[i] = a.mass * (props[i] / total_prop);
+  }
+
+  std::uniform_real_distribution<double> angle_dist(0.0, TWO_PI);
+  double base_angle = angle_dist(rng);
+
+  // Add jitter so the explosion angles don't look artificially perfect
+  constexpr double max_jitter = PI / 4.0;
+  std::uniform_real_distribution<double> jitter_dist(-max_jitter, max_jitter);
+
+  // Fracture releases a specific amount of internal kinetic energy
+  double released_energy = a.mass * AST_ASTEROID_FRACTURE_ENERGY_PER_MASS;
+  // Distribute fracture energy equally among fragments (regardless of mass)
+  double energy_per_frag = released_energy / count;
+
+  std::vector<Vec2> velocities(count);
+  std::vector<Vec2> offsets(count);
+  Vec2 momentum = {0.0, 0.0};
+  Vec2 cm = {0.0, 0.0};
+
+  for (int i = 0; i < count; ++i) {
+    double angle = base_angle + i * (TWO_PI / count) + jitter_dist(rng);
+
+    double speed = std::sqrt(2.0 * energy_per_frag / masses[i]);
+    velocities[i] = {std::cos(angle) * speed, std::sin(angle) * speed};
+    momentum += velocities[i] * masses[i];
+
+    // Push the fragments outward along the fracture lines so they don't
+    // instantly violently overlap. The offset ensures they spawn mostly clear
+    // of each other.
+    double frag_radius = std::sqrt(masses[i]) * AST_RADIUS_PER_SQRT_MASS;
+    double push_dist = a.radius * 0.5 + frag_radius * 0.5;
+    offsets[i] = {std::cos(angle) * push_dist, std::sin(angle) * push_dist};
+    cm += offsets[i] * masses[i];
+  }
+
+  // The net momentum of the outward pop must be zero and the center of mass
+  // must coincide with the original asteroid
+  Vec2 vel_corr = momentum / a.mass;
+  Vec2 pos_corr = cm / a.mass;
+
+  for (int i = 0; i < count; ++i) {
+    if (masses[i] < AST_MIN_ASTEROID_MASS) {
+      continue;  // Disintegrate into dust
+    }
+
+    Asteroid frag;
+    frag.mass = masses[i];
+    frag.pos = a.pos + offsets[i] - pos_corr;
+    frag.vel = a.vel + velocities[i] - vel_corr;
+    frag.stress = 0.0;
+    fragments.push_back(normalize_asteroid(frag));
+  }
+
+  return fragments;
+}
+
+bool should_merge(const Asteroid &a, const Asteroid &b, std::mt19937 &rng) {
+  double rel_vel = norm(a.vel - b.vel);
+  double min_mass = std::min(a.mass, b.mass),
+         max_mass = std::max(a.mass, b.mass);
+  double mass_ratio = min_mass / max_mass;
+
+  double p = 1.0;
+  p -= 1 - std::exp(-rel_vel / AST_ASTEROID_MERGE_SPEED_THRESHOLD);
+  p -= mass_ratio * 0.3;
+  p -= (a.stress + b.stress) / 2.0;
+  p = std::clamp(p, 0.0, 1.0);
+
+  std::uniform_real_distribution<double> dist(0.0, 1.0);
+  return dist(rng) < p;
+}
+
+bool should_split(const Asteroid &a, double impulse, std::mt19937 &rng) {
+  double p = a.stress;
+  p += 1 - std::exp(-impulse / a.mass * AST_ASTEROID_SPLIT_IMPULSE_SCALE);
+  std::uniform_real_distribution<double> dist(0.0, 1.0);
+  return dist(rng) < p;
 }
 
 }  // namespace
@@ -209,25 +307,45 @@ void Space::step(double dt) {
            std::abs(b.pos.y) > AST_WORLD_HALF_HEIGHT;
   });
 
-  // Bullet-asteroid collision
-  std::vector<bool> bullet_hit(bullets_.size(), false);
   std::uniform_int_distribution<int> seed_dist(1,
                                                std::numeric_limits<int>::max());
 
+  // Bullet-asteroid collision
+  std::vector<bool> bullet_hit(bullets_.size(), false);
+  std::vector<bool> asteroid_destroyed(asteroids_.size(), false);
+  std::vector<Asteroid> new_asteroids;
+
   for (size_t bi = 0; bi < bullets_.size(); ++bi) {
     for (size_t ai = 0; ai < asteroids_.size(); ++ai) {
+      if (asteroid_destroyed[ai]) continue;
+
+      // Check if bullet is within asteroid radius
       const Vec2 d = bullets_[bi].pos - asteroids_[ai].pos;
       const double r = asteroids_[ai].radius;
-      if (dot(d, d) > r * r) {
-        continue;
-      }
-
+      if (dot(d, d) > r * r) continue;
       bullet_hit[bi] = true;
 
       // Surface impact point in the direction of the incoming bullet
-      const double dn = std::max(norm(d), 1e-9);
+      const double dn = std::max(norm(d), ZERO_TOLERANCE);
       const Vec2 surf = asteroids_[ai].pos + (d / dn) * r;
-      explosions_.push_back({surf, r * 0.5, 0.0, seed_dist(random_engine_)});
+      explosions_.push_back(
+          {surf, r * AST_EXPLOSION_SCALE, 0.0, seed_dist(random_engine_)});
+
+      // Apply bullet physics (inelastic momentum transfer)
+      Vec2 old_vel = asteroids_[ai].vel;
+      asteroids_[ai].vel +=
+          bullets_[bi].vel * (AST_BULLET_MASS / asteroids_[ai].mass);
+      double impulse = norm(asteroids_[ai].vel - old_vel) * asteroids_[ai].mass;
+
+      asteroids_[ai].stress += AST_BULLET_STRESS;
+
+      if (should_split(asteroids_[ai], impulse, random_engine_)) {
+        std::vector<Asteroid> frags =
+            fragment_asteroid(asteroids_[ai], random_engine_);
+        new_asteroids.insert(new_asteroids.end(), frags.begin(), frags.end());
+        asteroid_destroyed[ai] = true;
+      }
+
       break;  // One bullet hits one asteroid
     }
   }
@@ -244,7 +362,114 @@ void Space::step(double dt) {
     bullets_ = std::move(surviving);
   }
 
-  // Other collisions
+  // Asteroid-asteroid collision
+  for (size_t i = 0; i < asteroids_.size(); ++i) {
+    if (asteroid_destroyed[i]) continue;
+    for (size_t j = i + 1; j < asteroids_.size(); ++j) {
+      if (asteroid_destroyed[j]) continue;
+
+      Vec2 r = asteroids_[j].pos - asteroids_[i].pos;
+      double dist2 = dot(r, r);
+      double rad_sum = asteroids_[i].radius + asteroids_[j].radius;
+      if (dist2 > rad_sum * rad_sum) continue;
+
+      double dist = std::sqrt(dist2);
+      dist = std::max(dist, ZERO_TOLERANCE);  // Avoid division by zero
+      Vec2 normal = r / dist;
+
+      Vec2 rel_vel = asteroids_[j].vel - asteroids_[i].vel;
+      double vel_along_normal = dot(rel_vel, normal);
+
+      // Do not resolve if velocities are separating
+      if (vel_along_normal > 0) continue;
+
+      if (should_merge(asteroids_[i], asteroids_[j], random_engine_)) {
+        Asteroid merged;
+        merged.mass = asteroids_[i].mass + asteroids_[j].mass;
+        merged.vel = (asteroids_[i].vel * asteroids_[i].mass +
+                      asteroids_[j].vel * asteroids_[j].mass) /
+                     merged.mass;
+        merged.pos = (asteroids_[i].pos * asteroids_[i].mass +
+                      asteroids_[j].pos * asteroids_[j].mass) /
+                     merged.mass;
+        // Inherit the ID of the larger one to keep shape continuity
+        merged.id = (asteroids_[i].mass > asteroids_[j].mass)
+                        ? asteroids_[i].id
+                        : asteroids_[j].id;
+        merged.stress = (asteroids_[i].stress * asteroids_[i].mass +
+                         asteroids_[j].stress * asteroids_[j].mass) /
+                        merged.mass;
+
+        merged = normalize_asteroid(merged);
+
+        asteroid_destroyed[i] = true;
+        asteroid_destroyed[j] = true;
+        new_asteroids.push_back(merged);
+        break;  // `i`-th asteroid is destroyed, break out of `j` loop
+      } else {
+        // Elastic-like bounce
+        double j_impulse =
+            -(1 + AST_ASTEROID_ELASTIC_RESTITUTION) * vel_along_normal;
+        j_impulse /= (1.0 / asteroids_[i].mass + 1.0 / asteroids_[j].mass);
+
+        Vec2 impulse = normal * j_impulse;
+        asteroids_[i].vel -= impulse / asteroids_[i].mass;
+        asteroids_[j].vel += impulse / asteroids_[j].mass;
+
+        asteroids_[i].stress +=
+            1 - std::exp(-std::abs(j_impulse) / asteroids_[i].mass *
+                         AST_ASTEROID_SPLIT_IMPULSE_SCALE);
+        asteroids_[j].stress +=
+            1 - std::exp(-std::abs(j_impulse) / asteroids_[j].mass *
+                         AST_ASTEROID_SPLIT_IMPULSE_SCALE);
+
+        // Separate them so they don't stick
+        double overlap = rad_sum - dist;
+        asteroids_[i].pos -= normal * (overlap * 0.5);
+        asteroids_[j].pos += normal * (overlap * 0.5);
+
+        if (should_split(asteroids_[i], std::abs(j_impulse), random_engine_)) {
+          std::vector<Asteroid> frags =
+              fragment_asteroid(asteroids_[i], random_engine_);
+          new_asteroids.insert(new_asteroids.end(), frags.begin(), frags.end());
+          asteroid_destroyed[i] = true;
+        }
+        if (should_split(asteroids_[j], std::abs(j_impulse), random_engine_)) {
+          std::vector<Asteroid> frags =
+              fragment_asteroid(asteroids_[j], random_engine_);
+          new_asteroids.insert(new_asteroids.end(), frags.begin(), frags.end());
+          asteroid_destroyed[j] = true;
+        }
+
+        if (asteroid_destroyed[i]) {
+          break;  // `i` is destroyed, break out of `j` loop
+        }
+      }
+    }
+  }
+
+  // Update asteroid list once per frame (after all collisions are processed)
+  {
+    std::vector<Asteroid> surviving;
+    surviving.reserve(asteroids_.size() + new_asteroids.size());
+    for (size_t i = 0; i < asteroids_.size(); ++i) {
+      if (!asteroid_destroyed[i]) {
+        // Natural stress healing over time
+        asteroids_[i].stress = std::max(
+            0.0, asteroids_[i].stress - AST_ASTEROID_STRESS_DECAY * dt);
+        surviving.push_back(asteroids_[i]);
+      } else {
+        // Spawn an explosion for newly destroyed asteroids
+        explosions_.push_back({asteroids_[i].pos, asteroids_[i].radius, 0.0,
+                               seed_dist(random_engine_)});
+      }
+    }
+
+    asteroids_ = std::move(surviving);
+    for (const auto &a : new_asteroids) {
+      add_asteroid(a);
+    }
+  }
 }
 
 const Space &Game::space() const { return space_; }
@@ -334,7 +559,7 @@ const std::vector<Vec2> &get_or_create_asteroid_shape(
   }
 
   const double area = polygon_area(polygon);
-  if (area > 1e-9) {
+  if (area > ZERO_TOLERANCE) {
     const double scale = std::sqrt(PI / area);
     for (Vec2 &point : polygon) {
       point.x *= scale;
@@ -367,7 +592,8 @@ void draw_asteroid_polygon(SDL_Renderer *renderer, int cx, int cy, int r,
 
 void draw_ship(SDL_Renderer *renderer, int cx, int cy, double angle,
                double radius) {
-  const double ac = std::cos(angle), as = std::sin(angle);  // Axis unit vector
+  const double ac = std::cos(angle),
+               as = std::sin(angle);  // Axis unit vector
   const double wc = std::cos(angle + 0.75 * PI),
                ws = std::sin(angle + 0.75 * PI);  // Left wing unit vector
 

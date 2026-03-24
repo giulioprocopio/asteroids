@@ -10,9 +10,11 @@
 #include <utility>
 #include <vector>
 
-#define ZERO_TOLERANCE 1e-9
+AsteroidsConfig asteroids_config{};
 
 namespace {
+
+const AsteroidsConfig &cfg() { return asteroids_config; }
 
 uint32_t hash_u32(uint32_t value) {
   value ^= value >> 17;
@@ -31,7 +33,7 @@ double random_unit_from_seed(uint32_t seed) {
 }
 
 Asteroid normalize_asteroid(Asteroid a) {
-  a.radius = std::sqrt(a.mass) * AST_RADIUS_PER_SQRT_MASS;
+  a.radius = std::sqrt(a.mass) * cfg().asteroid.radius_per_sqrt_mass;
   return a;
 }
 
@@ -42,11 +44,12 @@ std::vector<Vec2> compute_asteroid_accelerations(
   for (size_t i = 0; i < asteroids.size(); ++i) {
     for (size_t j = i + 1; j < asteroids.size(); ++j) {
       const Vec2 d = asteroids[j].pos - asteroids[i].pos;
-      const double d2 = dot(d, d) + AST_EPS * AST_EPS;
+      const double d2 =
+          dot(d, d) + cfg().physics.softening * cfg().physics.softening;
       const double inv_d = 1.0 / std::sqrt(d2);
       const double inv_d3 = inv_d * inv_d * inv_d;
-      const double si = AST_G * asteroids[j].mass * inv_d3;
-      const double sj = AST_G * asteroids[i].mass * inv_d3;
+      const double si = cfg().physics.gravity * asteroids[j].mass * inv_d3;
+      const double sj = cfg().physics.gravity * asteroids[i].mass * inv_d3;
       acc[i] += d * si;
       acc[j] -= d * sj;
     }
@@ -58,13 +61,14 @@ std::vector<Vec2> compute_asteroid_accelerations(
 Vec2 compute_ship_acceleration(const Vec2 &pos,
                                std::span<const Asteroid> asteroids) {
   Vec2 acc{0.0, 0.0};
-  if constexpr (AST_SHIP_GRAVITY) {
+  if (cfg().ship.gravity) {
     for (const auto &a : asteroids) {
       const Vec2 d = a.pos - pos;
-      const double d2 = dot(d, d) + AST_EPS * AST_EPS;
+      const double d2 =
+          dot(d, d) + cfg().physics.softening * cfg().physics.softening;
       const double inv_d = 1.0 / std::sqrt(d2);
       const double inv_d3 = inv_d * inv_d * inv_d;
-      acc += d * (AST_G * a.mass * inv_d3);
+      acc += d * (cfg().physics.gravity * a.mass * inv_d3);
     }
   }
   return acc;
@@ -97,7 +101,7 @@ std::vector<Asteroid> fragment_asteroid(const Asteroid &a, std::mt19937 &rng) {
   std::uniform_real_distribution<double> jitter_dist(-max_jitter, max_jitter);
 
   // Fracture releases a specific amount of internal kinetic energy
-  double released_energy = a.mass * AST_ASTEROID_FRACTURE_ENERGY_PER_MASS;
+  double released_energy = a.mass * cfg().asteroid.fracture_energy_per_mass;
   // Distribute fracture energy equally among fragments (regardless of mass)
   double energy_per_frag = released_energy / count;
 
@@ -116,7 +120,8 @@ std::vector<Asteroid> fragment_asteroid(const Asteroid &a, std::mt19937 &rng) {
     // Push the fragments outward along the fracture lines so they don't
     // instantly violently overlap. The offset ensures they spawn mostly clear
     // of each other.
-    double frag_radius = std::sqrt(masses[i]) * AST_RADIUS_PER_SQRT_MASS;
+    double frag_radius =
+        std::sqrt(masses[i]) * cfg().asteroid.radius_per_sqrt_mass;
     double push_dist = a.radius * 0.5 + frag_radius * 0.5;
     offsets[i] = {std::cos(angle) * push_dist, std::sin(angle) * push_dist};
     cm += offsets[i] * masses[i];
@@ -128,7 +133,7 @@ std::vector<Asteroid> fragment_asteroid(const Asteroid &a, std::mt19937 &rng) {
   Vec2 pos_corr = cm / a.mass;
 
   for (int i = 0; i < count; ++i) {
-    if (masses[i] < AST_MIN_ASTEROID_MASS) {
+    if (masses[i] < cfg().asteroid.min_mass) {
       continue;  // Disintegrate into dust
     }
 
@@ -150,7 +155,7 @@ bool should_merge(const Asteroid &a, const Asteroid &b, std::mt19937 &rng) {
   double mass_ratio = min_mass / max_mass;
 
   double p = 1.0;
-  p -= 1 - std::exp(-rel_vel / AST_ASTEROID_MERGE_SPEED_THRESHOLD);
+  p -= 1 - std::exp(-rel_vel / cfg().asteroid.merge_speed_threshold);
   p -= mass_ratio * 0.3;
   p -= (a.stress + b.stress) / 2.0;
   p = std::clamp(p, 0.0, 1.0);
@@ -161,7 +166,7 @@ bool should_merge(const Asteroid &a, const Asteroid &b, std::mt19937 &rng) {
 
 bool should_split(const Asteroid &a, double impulse, std::mt19937 &rng) {
   double p = a.stress;
-  p += 1 - std::exp(-impulse / a.mass * AST_ASTEROID_SPLIT_IMPULSE_SCALE);
+  p += 1 - std::exp(-impulse / a.mass * cfg().asteroid.split_impulse_scale);
   std::uniform_real_distribution<double> dist(0.0, 1.0);
   return dist(rng) < p;
 }
@@ -200,15 +205,15 @@ void Space::step(double dt) {
     e.age += dt;
   }
   std::erase_if(explosions_, [](const Explosion &e) {
-    return e.age > AST_ESPLOSION_LIFETIME;
+    return e.age > cfg().explosion.lifetime;
   });
 
   // Rotate ship
   if (input_.rotate_left) {
-    ship_.angle += AST_SHIP_ROTATION_SPEED * dt;
+    ship_.angle += cfg().ship.rotation_speed * dt;
   }
   if (input_.rotate_right) {
-    ship_.angle -= AST_SHIP_ROTATION_SPEED * dt;
+    ship_.angle -= cfg().ship.rotation_speed * dt;
   }
   ship_.angle = std::fmod(ship_.angle, TWO_PI);
 
@@ -223,10 +228,10 @@ void Space::step(double dt) {
 
     Vec2 acc_ship = compute_ship_acceleration(ship_.pos, asteroids_);
     if (input_.thrust_forward) {
-      acc_ship += thrust_dir * AST_SHIP_THRUST_FORWARD;
+      acc_ship += thrust_dir * cfg().ship.thrust_forward;
     }
     if (input_.thrust_backward) {
-      acc_ship -= thrust_dir * AST_SHIP_THRUST_BACKWARD;
+      acc_ship -= thrust_dir * cfg().ship.thrust_backward;
     }
     ship_.vel += acc_ship * (0.5 * dt);
   }
@@ -237,8 +242,8 @@ void Space::step(double dt) {
   }
   ship_.pos += ship_.vel * dt;
 
-  constexpr double bound_width = AST_WORLD_HALF_WIDTH - AST_SHIP_RADIUS;
-  constexpr double bound_height = AST_WORLD_HALF_HEIGHT - AST_SHIP_RADIUS;
+  const double bound_width = cfg().world.half_width - cfg().ship.radius;
+  const double bound_height = cfg().world.half_height - cfg().ship.radius;
 
   // Clamp ship to world boundary; zero velocity component into the wall
   if (ship_.pos.x < -bound_width) {
@@ -275,25 +280,25 @@ void Space::step(double dt) {
 
     Vec2 acc_ship = compute_ship_acceleration(ship_.pos, asteroids_);
     if (input_.thrust_forward) {
-      acc_ship += thrust_dir * AST_SHIP_THRUST_FORWARD;
+      acc_ship += thrust_dir * cfg().ship.thrust_forward;
     }
     if (input_.thrust_backward) {
-      acc_ship -= thrust_dir * AST_SHIP_THRUST_BACKWARD;
+      acc_ship -= thrust_dir * cfg().ship.thrust_backward;
     }
     ship_.vel += acc_ship * (0.5 * dt);
   }
 
   // Despawn asteroids that have left the finite world
   std::erase_if(asteroids_, [](const Asteroid &a) {
-    return std::abs(a.pos.x) > AST_WORLD_HALF_WIDTH ||
-           std::abs(a.pos.y) > AST_WORLD_HALF_HEIGHT;
+    return std::abs(a.pos.x) > cfg().world.half_width + cfg().world.padding ||
+           std::abs(a.pos.y) > cfg().world.half_height + cfg().world.padding;
   });
 
   // Spawn a bullet if a fire was triggered this frame
   if (fire_pending_) {
-    bullets_.push_back({ship_.pos + thrust_dir * AST_SHIP_RADIUS,
-                        ship_.vel + thrust_dir * AST_BULLET_SPEED,
-                        AST_BULLET_LIFETIME});
+    bullets_.push_back({ship_.pos + thrust_dir * cfg().ship.radius,
+                        ship_.vel + thrust_dir * cfg().bullet.speed,
+                        cfg().bullet.lifetime});
     fire_pending_ = false;
   }
 
@@ -303,8 +308,9 @@ void Space::step(double dt) {
     b.lifetime -= dt;
   }
   std::erase_if(bullets_, [](const Bullet &b) {
-    return b.lifetime <= 0.0 || std::abs(b.pos.x) > AST_WORLD_HALF_WIDTH ||
-           std::abs(b.pos.y) > AST_WORLD_HALF_HEIGHT;
+    return b.lifetime <= 0.0 ||
+           std::abs(b.pos.x) > cfg().world.half_width + cfg().world.padding ||
+           std::abs(b.pos.y) > cfg().world.half_height + cfg().world.padding;
   });
 
   std::uniform_int_distribution<int> seed_dist(1,
@@ -326,18 +332,18 @@ void Space::step(double dt) {
       bullet_hit[bi] = true;
 
       // Surface impact point in the direction of the incoming bullet
-      const double dn = std::max(norm(d), ZERO_TOLERANCE);
+      const double dn = std::max(norm(d), EPS);
       const Vec2 surf = asteroids_[ai].pos + (d / dn) * r;
       explosions_.push_back(
-          {surf, r * AST_EXPLOSION_SCALE, 0.0, seed_dist(random_engine_)});
+          {surf, r * cfg().explosion.scale, 0.0, seed_dist(random_engine_)});
 
       // Apply bullet physics (inelastic momentum transfer)
       Vec2 old_vel = asteroids_[ai].vel;
       asteroids_[ai].vel +=
-          bullets_[bi].vel * (AST_BULLET_MASS / asteroids_[ai].mass);
+          bullets_[bi].vel * (cfg().bullet.mass / asteroids_[ai].mass);
       double impulse = norm(asteroids_[ai].vel - old_vel) * asteroids_[ai].mass;
 
-      asteroids_[ai].stress += AST_BULLET_STRESS;
+      asteroids_[ai].stress += cfg().bullet.stress_on_hit;
 
       if (should_split(asteroids_[ai], impulse, random_engine_)) {
         std::vector<Asteroid> frags =
@@ -374,7 +380,7 @@ void Space::step(double dt) {
       if (dist2 > rad_sum * rad_sum) continue;
 
       double dist = std::sqrt(dist2);
-      dist = std::max(dist, ZERO_TOLERANCE);  // Avoid division by zero
+      dist = std::max(dist, EPS);  // Avoid division by zero
       Vec2 normal = r / dist;
 
       Vec2 rel_vel = asteroids_[j].vel - asteroids_[i].vel;
@@ -409,7 +415,7 @@ void Space::step(double dt) {
       } else {
         // Elastic-like bounce
         double j_impulse =
-            -(1 + AST_ASTEROID_ELASTIC_RESTITUTION) * vel_along_normal;
+            -(1 + cfg().asteroid.elastic_restitution) * vel_along_normal;
         j_impulse /= (1.0 / asteroids_[i].mass + 1.0 / asteroids_[j].mass);
 
         Vec2 impulse = normal * j_impulse;
@@ -418,10 +424,10 @@ void Space::step(double dt) {
 
         asteroids_[i].stress +=
             1 - std::exp(-std::abs(j_impulse) / asteroids_[i].mass *
-                         AST_ASTEROID_SPLIT_IMPULSE_SCALE);
+                         cfg().asteroid.split_impulse_scale);
         asteroids_[j].stress +=
             1 - std::exp(-std::abs(j_impulse) / asteroids_[j].mass *
-                         AST_ASTEROID_SPLIT_IMPULSE_SCALE);
+                         cfg().asteroid.split_impulse_scale);
 
         // Separate them so they don't stick
         double overlap = rad_sum - dist;
@@ -456,7 +462,7 @@ void Space::step(double dt) {
       if (!asteroid_destroyed[i]) {
         // Natural stress healing over time
         asteroids_[i].stress = std::max(
-            0.0, asteroids_[i].stress - AST_ASTEROID_STRESS_DECAY * dt);
+            0.0, asteroids_[i].stress - cfg().asteroid.stress_decay * dt);
         surviving.push_back(asteroids_[i]);
       } else {
         // Spawn an explosion for newly destroyed asteroids
@@ -519,7 +525,7 @@ void draw_circle_outline(SDL_Renderer *renderer, int cx, int cy, int r) {
     return;
   }
 
-  constexpr int segments = 24;
+  const int segments = std::max(6, cfg().render.circle_segments);
   for (int i = 0; i < segments; ++i) {
     const double a0 = (TWO_PI * i) / segments;
     const double a1 = (TWO_PI * (i + 1)) / segments;
@@ -559,7 +565,7 @@ const std::vector<Vec2> &get_or_create_asteroid_shape(
   }
 
   const double area = polygon_area(polygon);
-  if (area > ZERO_TOLERANCE) {
+  if (area > EPS) {
     const double scale = std::sqrt(PI / area);
     for (Vec2 &point : polygon) {
       point.x *= scale;
@@ -619,7 +625,7 @@ Renderer::Renderer(int window_width, int window_height) {
   state_->window_width = window_width;
   state_->window_height = window_height;
   SDL_Init(SDL_INIT_VIDEO);
-  state_->window = SDL_CreateWindow(AST_WINDOW_TITLE, SDL_WINDOWPOS_CENTERED,
+  state_->window = SDL_CreateWindow(cfg().window.title, SDL_WINDOWPOS_CENTERED,
                                     SDL_WINDOWPOS_CENTERED, window_width,
                                     window_height, SDL_WINDOW_SHOWN);
   state_->renderer = SDL_CreateRenderer(
@@ -675,8 +681,9 @@ void Renderer::render(const Game &game) {
   int width = state_->window_width;
   int height = state_->window_height;
   SDL_GetRendererOutputSize(state_->renderer, &width, &height);
-  const double scale = std::min(static_cast<double>(width) / AST_WINDOW_UNITS,
-                                static_cast<double>(height) / AST_WINDOW_UNITS);
+  const double scale =
+      std::min(static_cast<double>(width) / cfg().render.window_units,
+               static_cast<double>(height) / cfg().render.window_units);
 
   auto to_screen = [&](const Vec2 &world) {
     const double x = width * 0.5 + (world.x - camera.pos.x) * scale;
@@ -691,9 +698,9 @@ void Renderer::render(const Game &game) {
   // World bound rectangle
   {
     const auto [tlx, tly] =
-        to_screen({-AST_WORLD_HALF_WIDTH, AST_WORLD_HALF_HEIGHT});
+        to_screen({-cfg().world.half_width, cfg().world.half_height});
     const auto [brx, bry] =
-        to_screen({AST_WORLD_HALF_WIDTH, -AST_WORLD_HALF_HEIGHT});
+        to_screen({cfg().world.half_width, -cfg().world.half_height});
     SDL_Rect bounds{
         .x = std::min(tlx, brx),
         .y = std::min(tly, bry),
@@ -701,15 +708,37 @@ void Renderer::render(const Game &game) {
         .h = std::abs(bry - tly),
     };
     SDL_SetRenderDrawColor(state_->renderer, 255, 255, 255, 255);
-    SDL_RenderDrawRect(state_->renderer, &bounds);
+
+    const int step = cfg().render.bound_dash + cfg().render.bound_gap;
+
+    for (int x = bounds.x; x < bounds.x + bounds.w; x += step) {
+      const int x2 = std::min(x + cfg().render.bound_dash, bounds.x + bounds.w);
+      SDL_RenderDrawLine(state_->renderer, x, bounds.y, x2, bounds.y);
+      SDL_RenderDrawLine(state_->renderer, x, bounds.y + bounds.h, x2,
+                         bounds.y + bounds.h);
+    }
+
+    for (int y = bounds.y; y < bounds.y + bounds.h; y += step) {
+      const int y2 = std::min(y + cfg().render.bound_dash, bounds.y + bounds.h);
+      SDL_RenderDrawLine(state_->renderer, bounds.x, y, bounds.x, y2);
+      SDL_RenderDrawLine(state_->renderer, bounds.x + bounds.w, y,
+                         bounds.x + bounds.w, y2);
+    }
   }
 
   // Asteroids
-  SDL_SetRenderDrawColor(state_->renderer, 255, 255, 255, 255);
   for (const Asteroid &asteroid : space.asteroids()) {
+#if AST_DEBUG_STRESS_GRADIENT
+    const double stress = std::clamp(asteroid.stress, 0.0, 1.0);
+    const Uint8 value = static_cast<Uint8>(std::lround(80.0 + stress * 175.0));
+    SDL_SetRenderDrawColor(state_->renderer, value, value, value, 255);
+#else
+    SDL_SetRenderDrawColor(state_->renderer, 255, 255, 255, 255);
+#endif
     const auto [x, y] = to_screen(asteroid.pos);
     const int r =
-        std::max(2, static_cast<int>(std::lround(asteroid.radius * scale)));
+        std::max(cfg().render.min_draw_radius_px,
+                 static_cast<int>(std::lround(asteroid.radius * scale)));
     draw_asteroid_polygon(state_->renderer, x, y, r, asteroid.id,
                           state_->asteroid_shapes);
   }
@@ -718,7 +747,9 @@ void Renderer::render(const Game &game) {
   SDL_SetRenderDrawColor(state_->renderer, 255, 255, 255, 255);
   for (const Bullet &bullet : space.bullets()) {
     const auto [x, y] = to_screen(bullet.pos);
-    SDL_Rect rect{x - 1, y - 1, 3, 3};
+    SDL_Rect rect{x - cfg().render.bullet_half_px,
+                  y - cfg().render.bullet_half_px, cfg().render.bullet_size_px,
+                  cfg().render.bullet_size_px};
     SDL_RenderFillRect(state_->renderer, &rect);
   }
 
@@ -727,7 +758,8 @@ void Renderer::render(const Game &game) {
   for (const Explosion &explosion : space.explosions()) {
     const auto [x, y] = to_screen(explosion.pos);
     const int r =
-        std::max(2, static_cast<int>(std::lround(explosion.radius * scale)));
+        std::max(cfg().render.min_draw_radius_px,
+                 static_cast<int>(std::lround(explosion.radius * scale)));
     draw_circle_outline(state_->renderer, x, y, r);
   }
 
@@ -735,7 +767,7 @@ void Renderer::render(const Game &game) {
   {
     const auto [x, y] = to_screen(ship.pos);
     SDL_SetRenderDrawColor(state_->renderer, 255, 255, 255, 255);
-    draw_ship(state_->renderer, x, y, ship.angle, AST_SHIP_RADIUS * scale);
+    draw_ship(state_->renderer, x, y, ship.angle, cfg().ship.radius * scale);
   }
 
   SDL_RenderPresent(state_->renderer);

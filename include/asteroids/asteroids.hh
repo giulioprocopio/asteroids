@@ -16,40 +16,85 @@
 #endif
 #endif
 
-#define AST_WINDOW_TITLE "Asteroids"
+#define AST_TITLE "Asteroids"
 #define AST_WINDOW_WIDTH 1280
 #define AST_WINDOW_HEIGHT 720
-#define AST_WINDOW_UNITS \
-  1000.0  // World units corresponding to the smaller window dimension (with
-          // default zoom)
 
-// Times are in seconds, angles in radians, distances and masses in arbitrary
-// units.
-#define AST_WORLD_HALF_WIDTH 2000.0
-#define AST_WORLD_HALF_HEIGHT 2000.0
-#define AST_G 20.0
-#define AST_EPS 1.0  // Softening to prevent singularities
-#define AST_ESPLOSION_LIFETIME 0.35
-#define AST_SHIP_THRUST_FORWARD 75.0
-#define AST_SHIP_THRUST_BACKWARD 40.0
-#define AST_SHIP_ROTATION_SPEED 3.0
-#define AST_BULLET_SPEED 150.0
-#define AST_BULLET_LIFETIME 3.0
-#define AST_BULLET_MASS 20.0
-#define AST_BULLET_STRESS 0.2
-#define AST_RADIUS_PER_SQRT_MASS 0.5  // Radius per square root of mass
-#define AST_SHIP_RADIUS 20.0
-#define AST_SHIP_GRAVITY true  // Ship is affected by asteroid gravity
-#define AST_MIN_ASTEROID_MASS 100.0
-#define AST_ASTEROID_FRACTURE_ENERGY_PER_MASS 1000.0
-#define AST_ASTEROID_MERGE_SPEED_THRESHOLD 75.0
-#define AST_ASTEROID_SPLIT_IMPULSE_SCALE 0.2
-#define AST_EXPLOSION_SCALE 0.5
-#define AST_ASTEROID_ELASTIC_RESTITUTION 0.5
-#define AST_ASTEROID_STRESS_DECAY 0.05  // Stress healing per second
+struct WindowConfig {
+  const char *title = AST_TITLE;
+  int width = AST_WINDOW_WIDTH;
+  int height = AST_WINDOW_HEIGHT;
+};
 
-#define AST_WORLD_WIDTH (2.0 * AST_WORLD_HALF_WIDTH)
-#define AST_WORLD_HEIGHT (2.0 * AST_WORLD_HALF_HEIGHT)
+struct WorldConfig {
+  double half_width = 2000.0;
+  double half_height = 2000.0;
+  double padding = 1000.0;
+};
+
+struct PhysicsConfig {
+  double gravity = 20.0;
+  double softening = 1.0;
+};
+
+struct ShipConfig {
+  double radius = 20.0;
+  double thrust_forward = 75.0;
+  double thrust_backward = 40.0;
+  double rotation_speed = 3.0;
+  bool gravity = true;
+};
+
+struct BulletConfig {
+  double speed = 150.0;
+  double lifetime = 3.0;
+  double mass = 20.0;
+  double stress_on_hit = 0.1;
+};
+
+struct AsteroidConfig {
+  double radius_per_sqrt_mass = 0.5;
+  double min_mass = 100.0;
+  double fracture_energy_per_mass = 1000.0;
+  double elastic_restitution = 0.5;
+  double split_impulse_scale = 0.2;
+  double merge_speed_threshold = 75.0;
+  double stress_decay = 0.05;
+};
+
+struct ExplosionConfig {
+  double scale = 0.5;
+  double lifetime = 0.35;
+};
+
+struct RenderConfig {
+  double window_units = 1000.0;
+  int bound_dash = 10;
+  int bound_gap = 10;
+  int min_draw_radius_px = 2;
+  int circle_segments = 24;
+  int bullet_size_px = 3;
+  int bullet_half_px = 1;
+};
+
+struct TimingConfig {
+  double fixed_dt = 1.0 / 120.0;
+  double max_frame_dt = 0.25;
+};
+
+struct AsteroidsConfig {
+  WindowConfig window{};
+  WorldConfig world{};
+  PhysicsConfig physics{};
+  ShipConfig ship{};
+  BulletConfig bullet{};
+  AsteroidConfig asteroid{};
+  ExplosionConfig explosion{};
+  RenderConfig render{};
+  TimingConfig timing{};
+};
+
+extern AsteroidsConfig asteroids_config;
 
 // Math utilities
 
@@ -58,6 +103,8 @@
 #endif
 #define PI M_PI
 #define TWO_PI (2.0 * M_PI)
+
+#define EPS 1e-6
 
 struct Vec2 {
   double x, y;

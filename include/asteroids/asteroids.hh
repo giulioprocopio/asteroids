@@ -57,7 +57,7 @@ struct AsteroidConfig {
   double min_mass = 100.0;
   double fracture_energy_per_mass = 1000.0;
   double elastic_restitution = 0.5;
-  double split_impulse_scale = 0.2;
+  double split_impulse_scale = 0.1;
   double merge_speed_threshold = 75.0;
   double stress_decay = 0.05;
 };
@@ -69,8 +69,8 @@ struct ExplosionConfig {
 
 struct RenderConfig {
   double window_units = 1000.0;
-  int bound_dash = 10;
-  int bound_gap = 10;
+  int bound_dash = 20;
+  int bound_gap = 20;
   int min_draw_radius_px = 2;
   int circle_segments = 24;
   int bullet_size_px = 3;
@@ -215,13 +215,22 @@ class Game {
   const Space &space() const;
   CameraState camera() const;
 
-  void add_asteroid(Asteroid a);
   void set_ship(Ship s);
+
   void handle_input(const InputState &input);
   void update(double dt);
 
+  void add_asteroid(Asteroid a);
+  void generate_asteroid(const Vec2 &pos, double min_mass, double max_mass,
+                         double min_momentum, double max_momentum);
+  void generate_asteroid_field(const Vec2 &center, double radius,
+                               double density, double min_mass, double max_mass,
+                               double min_momentum, double max_momentum);
+  void remove_asteroids(const Vec2 &center, double radius);
+
  private:
   Space space_;
+  std::mt19937 random_engine_{std::random_device{}()};
 };
 
 #ifdef AST_USE_SDL2

@@ -15,8 +15,11 @@ void add_default_asteroids(Game &game) {
 
 int main() {
   Game game;
+  // add_default_asteroids(game);
+  game.generate_asteroid_field({0.0, 0.0}, 1000.0, 1e-5, 100.0, 10000.0, 0.0,
+                               30000.0);
   game.set_ship({.pos = {0.0, 0.0}, .vel = {0.0, 0.0}, .angle = 0.0});
-  add_default_asteroids(game);
+  game.remove_asteroids({0.0, 0.0}, 100.0);
 
 #ifdef AST_USE_SDL2
   Renderer renderer(asteroids_config.window.width,

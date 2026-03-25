@@ -51,16 +51,21 @@ struct ShipConfig {
 };
 
 struct BulletConfig {
-  double speed = 150.0;
+  double speed = 200.0;
   double lifetime = 3.0;
   double mass = 20.0;
-  double stress_on_hit = 0.1;
+  double stress_on_hit = 0.2;
+#if AST_DEBUG
+  bool gravity = false;
+#else
+  bool gravity = true;
+#endif
 };
 
 struct AsteroidConfig {
   double radius_per_sqrt_mass = 0.5;
   double min_mass = 100.0;
-  double fracture_energy_per_mass = 700.0;
+  double fracture_energy_per_mass = 1000.0;
   double elastic_restitution = 0.5;
   double split_impulse_scale = 0.1;
   double merge_speed_threshold = 75.0;

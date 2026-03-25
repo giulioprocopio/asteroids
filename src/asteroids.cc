@@ -64,21 +64,19 @@ std::vector<Vec2> compute_asteroid_accelerations(
 }
 
 // Gravitational acceleration on a single point from all asteroids.
-Vec2 compute_ship_acceleration(const Vec2 &pos,
-                               std::span<const Asteroid> asteroids) {
+Vec2 compute_point_acceleration(const Vec2 &pos,
+                                std::span<const Asteroid> asteroids) {
   Vec2 acc{0.0, 0.0};
-  if (cfg().ship.gravity) {
-    for (const auto &a : asteroids) {
-      if (!a.active) {
-        continue;
-      }
-      const Vec2 d = a.pos - pos;
-      const double d2 =
-          dot(d, d) + cfg().physics.softening * cfg().physics.softening;
-      const double inv_d = 1.0 / std::sqrt(d2);
-      const double inv_d3 = inv_d * inv_d * inv_d;
-      acc += d * (cfg().physics.gravity * a.mass * inv_d3);
+  for (const auto &a : asteroids) {
+    if (!a.active) {
+      continue;
     }
+    const Vec2 d = a.pos - pos;
+    const double d2 =
+        dot(d, d) + cfg().physics.softening * cfg().physics.softening;
+    const double inv_d = 1.0 / std::sqrt(d2);
+    const double inv_d3 = inv_d * inv_d * inv_d;
+    acc += d * (cfg().physics.gravity * a.mass * inv_d3);
   }
   return acc;
 }
@@ -258,7 +256,10 @@ void Space::step(double dt) {
       }
     }
 
-    Vec2 acc_ship = compute_ship_acceleration(ship_.pos, asteroids_);
+    Vec2 acc_ship = {0.0, 0.0};
+    if (cfg().ship.gravity) {
+      acc_ship += compute_point_acceleration(ship_.pos, asteroids_);
+    }
     if (input_.thrust_forward) {
       acc_ship += thrust_dir * cfg().ship.thrust_forward;
     }
@@ -266,6 +267,12 @@ void Space::step(double dt) {
       acc_ship -= thrust_dir * cfg().ship.thrust_backward;
     }
     ship_.vel += acc_ship * (0.5 * dt);
+
+    if (cfg().bullet.gravity) {
+      for (auto &b : bullets_) {
+        b.vel += compute_point_acceleration(b.pos, asteroids_) * (0.5 * dt);
+      }
+    }
   }
 
   // Drift
@@ -316,7 +323,10 @@ void Space::step(double dt) {
       }
     }
 
-    Vec2 acc_ship = compute_ship_acceleration(ship_.pos, asteroids_);
+    Vec2 acc_ship = {0.0, 0.0};
+    if (cfg().ship.gravity) {
+      acc_ship += compute_point_acceleration(ship_.pos, asteroids_);
+    }
     if (input_.thrust_forward) {
       acc_ship += thrust_dir * cfg().ship.thrust_forward;
     }
@@ -324,6 +334,12 @@ void Space::step(double dt) {
       acc_ship -= thrust_dir * cfg().ship.thrust_backward;
     }
     ship_.vel += acc_ship * (0.5 * dt);
+
+    if (cfg().bullet.gravity) {
+      for (auto &b : bullets_) {
+        b.vel += compute_point_acceleration(b.pos, asteroids_) * (0.5 * dt);
+      }
+    }
   }
 
   // Despawn asteroids that have left the finite world

@@ -19,6 +19,7 @@
 #define AST_TITLE "Asteroids"
 #define AST_WINDOW_WIDTH 1280
 #define AST_WINDOW_HEIGHT 720
+#define AST_DEBUG 0
 
 struct WindowConfig {
   const char *title = AST_TITLE;
@@ -27,8 +28,8 @@ struct WindowConfig {
 };
 
 struct WorldConfig {
-  double half_width = 2000.0;
-  double half_height = 2000.0;
+  double half_width = 3000.0;
+  double half_height = 3000.0;
   double padding = 1000.0;
 };
 
@@ -42,7 +43,11 @@ struct ShipConfig {
   double thrust_forward = 75.0;
   double thrust_backward = 40.0;
   double rotation_speed = 3.0;
+#if AST_DEBUG
+  bool gravity = false;
+#else
   bool gravity = true;
+#endif
 };
 
 struct BulletConfig {
@@ -60,6 +65,14 @@ struct AsteroidConfig {
   double split_impulse_scale = 0.1;
   double merge_speed_threshold = 75.0;
   double stress_decay = 0.05;
+#if AST_DEBUG
+  double active_radius = 200.0;
+  double passive_radius = 200.0;
+#else
+  double active_radius = 1200.0;
+  double passive_radius = 1600.0;
+#endif
+  int passive_update_stride = 4;
 };
 
 struct ExplosionConfig {
@@ -68,7 +81,8 @@ struct ExplosionConfig {
 };
 
 struct RenderConfig {
-  double window_units = 1000.0;
+  double window_units =
+      1000.0;  // Number of world units that fit in the smaller window dimension
   int bound_dash = 20;
   int bound_gap = 20;
   int min_draw_radius_px = 2;
@@ -78,7 +92,7 @@ struct RenderConfig {
 };
 
 struct TimingConfig {
-  double fixed_dt = 1.0 / 120.0;
+  double fixed_dt = 1.0 / 60.0;
   double max_frame_dt = 0.25;
 };
 
@@ -145,6 +159,7 @@ struct Asteroid {
   double radius = 0.0;
   int id = 0;
   double stress = 0.0;
+  bool active = true;
 };
 
 struct Ship {
@@ -206,6 +221,7 @@ class Space {
 
   InputState input_{};
   bool fire_pending_ = false;  // Edge-triggered fire flag
+  unsigned int step_counter_ = 0;
 
   std::mt19937 random_engine_{std::random_device{}()};
 };

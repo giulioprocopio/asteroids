@@ -16,7 +16,7 @@ void add_default_asteroids(Game &game) {
 int main() {
   Game game;
   // add_default_asteroids(game);
-  game.generate_asteroid_field(1e-5, 100.0, 10000.0, 0.0, 30000.0);
+  game.generate_asteroid_field(1e-5, 100.0, 10000.0, 0.0, 20000.0);
   game.set_ship({.pos = {0.0, 0.0}, .vel = {0.0, 0.0}, .angle = 0.0});
   game.remove_asteroids({0.0, 0.0}, 100.0);
 

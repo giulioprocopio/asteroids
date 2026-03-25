@@ -42,7 +42,13 @@ std::vector<Vec2> compute_asteroid_accelerations(
     std::span<const Asteroid> asteroids) {
   std::vector<Vec2> acc(asteroids.size(), {0.0, 0.0});
   for (size_t i = 0; i < asteroids.size(); ++i) {
+    if (!asteroids[i].active) {
+      continue;
+    }
     for (size_t j = i + 1; j < asteroids.size(); ++j) {
+      if (!asteroids[j].active) {
+        continue;
+      }
       const Vec2 d = asteroids[j].pos - asteroids[i].pos;
       const double d2 =
           dot(d, d) + cfg().physics.softening * cfg().physics.softening;
@@ -63,6 +69,9 @@ Vec2 compute_ship_acceleration(const Vec2 &pos,
   Vec2 acc{0.0, 0.0};
   if (cfg().ship.gravity) {
     for (const auto &a : asteroids) {
+      if (!a.active) {
+        continue;
+      }
       const Vec2 d = a.pos - pos;
       const double d2 =
           dot(d, d) + cfg().physics.softening * cfg().physics.softening;
@@ -77,7 +86,7 @@ Vec2 compute_ship_acceleration(const Vec2 &pos,
 std::vector<Asteroid> fragment_asteroid(const Asteroid &a, std::mt19937 &rng) {
   std::vector<Asteroid> fragments;
 
-  std::discrete_distribution<int> count_dist({50, 30, 15, 5});
+  std::discrete_distribution<int> count_dist({60, 30, 15, 5});
   int count = count_dist(rng) + 2;
 
   std::vector<double> props(count);
@@ -200,6 +209,27 @@ std::span<const Explosion> Space::explosions() const { return explosions_; }
 const Ship &Space::ship() const { return ship_; }
 
 void Space::step(double dt) {
+  const double ar2 =
+      cfg().asteroid.active_radius * cfg().asteroid.active_radius;
+  const double dr2 =
+      cfg().asteroid.passive_radius * cfg().asteroid.passive_radius;
+  for (auto &a : asteroids_) {
+    const Vec2 d = a.pos - ship_.pos;
+    const double d2 = dot(d, d);
+    if (a.active) {
+      if (d2 > dr2) {
+        a.active = false;
+      }
+    } else if (d2 < ar2) {
+      a.active = true;
+    }
+  }
+
+  const int passive_stride = std::max(1, cfg().asteroid.passive_update_stride);
+  ++step_counter_;
+  const bool passive_tick =
+      (step_counter_ % static_cast<unsigned int>(passive_stride)) == 0;
+
   // Remove expired explosions
   for (auto &e : explosions_) {
     e.age += dt;
@@ -223,7 +253,9 @@ void Space::step(double dt) {
   {
     auto acc_ast = compute_asteroid_accelerations(asteroids_);
     for (size_t i = 0; i < asteroids_.size(); ++i) {
-      asteroids_[i].vel += acc_ast[i] * (0.5 * dt);
+      if (asteroids_[i].active) {
+        asteroids_[i].vel += acc_ast[i] * (0.5 * dt);
+      }
     }
 
     Vec2 acc_ship = compute_ship_acceleration(ship_.pos, asteroids_);
@@ -238,7 +270,11 @@ void Space::step(double dt) {
 
   // Drift
   for (auto &a : asteroids_) {
-    a.pos += a.vel * dt;
+    if (a.active) {
+      a.pos += a.vel * dt;
+    } else if (passive_tick) {
+      a.pos += a.vel * (dt * passive_stride);
+    }
   }
   ship_.pos += ship_.vel * dt;
 
@@ -275,7 +311,9 @@ void Space::step(double dt) {
   {
     auto acc_ast = compute_asteroid_accelerations(asteroids_);
     for (size_t i = 0; i < asteroids_.size(); ++i) {
-      asteroids_[i].vel += acc_ast[i] * (0.5 * dt);
+      if (asteroids_[i].active) {
+        asteroids_[i].vel += acc_ast[i] * (0.5 * dt);
+      }
     }
 
     Vec2 acc_ship = compute_ship_acceleration(ship_.pos, asteroids_);
@@ -324,6 +362,7 @@ void Space::step(double dt) {
   for (size_t bi = 0; bi < bullets_.size(); ++bi) {
     for (size_t ai = 0; ai < asteroids_.size(); ++ai) {
       if (asteroid_destroyed[ai]) continue;
+      if (!asteroids_[ai].active) continue;
 
       // Check if bullet is within asteroid radius
       const Vec2 d = bullets_[bi].pos - asteroids_[ai].pos;
@@ -371,8 +410,10 @@ void Space::step(double dt) {
   // Asteroid-asteroid collision
   for (size_t i = 0; i < asteroids_.size(); ++i) {
     if (asteroid_destroyed[i]) continue;
+    if (!asteroids_[i].active) continue;
     for (size_t j = i + 1; j < asteroids_.size(); ++j) {
       if (asteroid_destroyed[j]) continue;
+      if (!asteroids_[j].active) continue;
 
       Vec2 r = asteroids_[j].pos - asteroids_[i].pos;
       double dist2 = dot(r, r);
@@ -461,8 +502,10 @@ void Space::step(double dt) {
     for (size_t i = 0; i < asteroids_.size(); ++i) {
       if (!asteroid_destroyed[i]) {
         // Natural stress healing over time
-        asteroids_[i].stress = std::max(
-            0.0, asteroids_[i].stress - cfg().asteroid.stress_decay * dt);
+        if (asteroids_[i].active) {
+          asteroids_[i].stress = std::max(
+              0.0, asteroids_[i].stress - cfg().asteroid.stress_decay * dt);
+        }
         surviving.push_back(asteroids_[i]);
       } else {
         // Spawn an explosion for newly destroyed asteroids

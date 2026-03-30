@@ -16,6 +16,8 @@
 #endif
 #endif
 
+// Config and constants
+
 #define AST_TITLE "Asteroids"
 #define AST_WINDOW_WIDTH 1280
 #define AST_WINDOW_HEIGHT 720
@@ -28,8 +30,8 @@ struct WindowConfig {
 };
 
 struct WorldConfig {
-  double half_width = 3000.0;
-  double half_height = 3000.0;
+  double half_width = 4000.0;
+  double half_height = 4000.0;
   double padding = 1000.0;
 };
 
@@ -66,7 +68,7 @@ struct AsteroidConfig {
   double radius_per_sqrt_mass = 0.5;
   double min_mass = 100.0;
   double fracture_energy_per_mass = 1000.0;
-  double elastic_restitution = 0.5;
+  double elastic_restitution = 0.85;
   double split_impulse_scale = 0.1;
   double merge_speed_threshold = 75.0;
   double stress_decay = 0.05;
@@ -156,6 +158,13 @@ inline double dot(const Vec2 &a, const Vec2 &b) {
 }
 inline double norm(const Vec2 &v) { return std::sqrt(dot(v, v)); }
 
+// Utilities
+
+template <typename T>
+struct Range {
+  T min, max;
+};
+
 // Entity definitions
 
 struct Asteroid {
@@ -236,20 +245,26 @@ class Game {
   const Space &space() const;
   CameraState camera() const;
 
-  void set_ship(Ship s);
+  void set_ship(Ship s = {});
 
   void handle_input(const InputState &input);
   void update(double dt);
 
-  void add_asteroid(Asteroid a);
-  void generate_asteroid(const Vec2 &pos, double min_mass, double max_mass,
-                         double min_momentum, double max_momentum);
-  void generate_asteroid_field(const Vec2 &center, double radius,
-                               double density, double min_mass, double max_mass,
-                               double min_momentum, double max_momentum);
-  void generate_asteroid_field(double density, double min_mass, double max_mass,
-                               double min_momentum, double max_momentum);
-  void remove_asteroids(const Vec2 &center, double radius);
+  void add_asteroid(Asteroid a = {});
+  void generate_rand_asteroid(const Vec2 &pos, Range<double> mass,
+                              Range<double> momentum,
+                              Vec2 vel_bias = {0.0, 0.0});
+  void generate_rand_asteroid_cluster(const Vec2 &center, double radius,
+                                      double density, Range<double> mass,
+                                      Range<double> momentum,
+                                      Vec2 vel_bias = {0.0, 0.0});
+  void generate_rand_world_asteroids(double density, Range<double> mass,
+                                     Range<double> momentum,
+                                     Vec2 vel_bias = {0.0, 0.0});
+  void clear_ship_vicinity(double radius = 50.0);
+  void generate_rand_incoming_asteroids(double density, Range<double> mass,
+                                        Range<double> momentum,
+                                        Vec2 vel_bias = {0.0, 0.0});
 
  private:
   Space space_;

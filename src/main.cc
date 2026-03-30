@@ -16,9 +16,10 @@ void add_default_asteroids(Game &game) {
 int main() {
   Game game;
   // add_default_asteroids(game);
-  game.generate_asteroid_field(5e-6, 100.0, 10000.0, 0.0, 20000.0);
-  game.set_ship({.pos = {0.0, 0.0}, .vel = {0.0, 0.0}, .angle = 0.0});
-  game.remove_asteroids({0.0, 0.0}, 100.0);
+  game.generate_rand_world_asteroids(2e-6, {100.0, 10000.0}, {0.0, 20000.0},
+                                     {-50.0, 0.0});
+  game.set_ship();
+  game.clear_ship_vicinity();
 
 #ifdef AST_USE_SDL2
   Renderer renderer(asteroids_config.window.width,
@@ -27,6 +28,8 @@ int main() {
 
   auto last_time = Clock::now();
   double accumulator = 0.0;
+
+  double border_spawn_rate = 7.5e-4;
 
   while (!renderer.should_quit()) {
     const auto now = Clock::now();
@@ -39,6 +42,10 @@ int main() {
 
     game.handle_input(renderer.poll_input());
     while (accumulator >= asteroids_config.timing.fixed_dt) {
+      const double step_density =
+          border_spawn_rate * asteroids_config.timing.fixed_dt;
+      game.generate_rand_incoming_asteroids(step_density, {100.0, 1000.0},
+                                            {15000.0, 40000.0}, {0.0, 0.0});
       game.update(asteroids_config.timing.fixed_dt);
       accumulator -= asteroids_config.timing.fixed_dt;
     }

@@ -550,19 +550,19 @@ void Game::update(double dt) { space_.step(dt); }
 
 void Game::add_asteroid(Asteroid a) { space_.add_asteroid(std::move(a)); }
 
-void Game::generate_asteroid(const Vec2 &pos, double min_mass, double max_mass,
-                             double min_momentum, double max_momentum) {
-  const double mass_lo = std::max(min_mass, cfg().asteroid.min_mass);
-  const double mass_hi = std::max(max_mass, mass_lo);
-  const double momentum_lo = std::max(min_momentum, 0.0);
-  const double momentum_hi = std::max(max_momentum, momentum_lo);
+void Game::generate_rand_asteroid(const Vec2 &pos, Range<double> mass,
+                                  Range<double> momentum, Vec2 vel_bias) {
+  const double mass_lo = std::max(mass.min, cfg().asteroid.min_mass);
+  const double mass_hi = std::max(mass.max, mass_lo);
+  const double momentum_lo = std::max(momentum.min, 0.0);
+  const double momentum_hi = std::max(momentum.max, momentum_lo);
 
   std::uniform_real_distribution<double> mass_dist(mass_lo, mass_hi);
   std::uniform_real_distribution<double> momentum_dist(momentum_lo,
                                                        momentum_hi);
   std::uniform_real_distribution<double> angle_dist(0.0, TWO_PI);
 
-  const double mass = mass_dist(random_engine_);
+  const double m = mass_dist(random_engine_);
 
   // Skip asteroids that would spawn inside another one to avoid instant
   // high impulse collisions.
@@ -570,7 +570,7 @@ void Game::generate_asteroid(const Vec2 &pos, double min_mass, double max_mass,
   for (const auto &a : space_.asteroids()) {
     const Vec2 d = a.pos - pos;
     const double r =
-        a.radius + std::sqrt(mass) * cfg().asteroid.radius_per_sqrt_mass;
+        a.radius + std::sqrt(m) * cfg().asteroid.radius_per_sqrt_mass;
     if (dot(d, d) < r * r) {
       collides = true;
       break;
@@ -581,22 +581,24 @@ void Game::generate_asteroid(const Vec2 &pos, double min_mass, double max_mass,
   }
 
   const double angle_vel = angle_dist(random_engine_);
-  const double speed = momentum_dist(random_engine_) / mass;
+  const double speed = momentum_dist(random_engine_) / m;
   const Vec2 vel{std::cos(angle_vel) * speed, std::sin(angle_vel) * speed};
 
-  add_asteroid({.pos = pos, .vel = vel, .mass = mass});
+  add_asteroid({.pos = pos, .vel = vel + vel_bias, .mass = m});
 }
 
-void Game::generate_asteroid_field(const Vec2 &center, double radius,
-                                   double density, double min_mass,
-                                   double max_mass, double min_momentum,
-                                   double max_momentum) {
+void Game::generate_rand_asteroid_cluster(const Vec2 &center, double radius,
+                                          double density, Range<double> mass,
+                                          Range<double> momentum,
+                                          Vec2 vel_bias) {
   if (radius <= 0.0 || density <= 0.0) {
     return;
   }
 
   const double area = PI * radius * radius;
-  const int count = std::max(1, static_cast<int>(std::lround(area * density)));
+  const double lambda = std::max(0.0, area * density);
+  std::poisson_distribution<int> count_dist(lambda);
+  const int count = count_dist(random_engine_);
 
   std::uniform_real_distribution<double> angle_dist(0.0, TWO_PI);
   std::uniform_real_distribution<double> radial_dist(0.0, 1.0);
@@ -608,34 +610,72 @@ void Game::generate_asteroid_field(const Vec2 &center, double radius,
     const Vec2 pos{center.x + std::cos(angle_pos) * dist,
                    center.y + std::sin(angle_pos) * dist};
 
-    generate_asteroid(pos, min_mass, max_mass, min_momentum, max_momentum);
+    generate_rand_asteroid(pos, mass, momentum, vel_bias);
   }
 }
 
-void Game::generate_asteroid_field(double density, double min_mass,
-                                   double max_mass, double min_momentum,
-                                   double max_momentum) {
+void Game::generate_rand_world_asteroids(double density, Range<double> mass,
+                                         Range<double> momentum,
+                                         Vec2 vel_bias) {
   const Vec2 center{0.0, 0.0};
   const double radius =
       std::sqrt(cfg().world.half_width * cfg().world.half_width +
                 cfg().world.half_height * cfg().world.half_height);
-  generate_asteroid_field(center, radius, density, min_mass, max_mass,
-                          min_momentum, max_momentum);
+
+  generate_rand_asteroid_cluster(center, radius, density, mass, momentum,
+                                 vel_bias);
 }
 
-void Game::remove_asteroids(const Vec2 &center, double radius) {
+void Game::clear_ship_vicinity(double radius) {
   if (radius <= 0.0) {
     return;
   }
 
+  Vec2 ship_pos = space_.ship().pos;
+
   std::vector<Asteroid> surviving;
   for (const auto &a : space_.asteroids()) {
-    Vec2 d = a.pos - center;
+    Vec2 d = a.pos - ship_pos;
     if (dot(d, d) > radius * radius) {
       surviving.push_back(a);
     }
   }
   space_.asteroids() = std::move(surviving);
+}
+
+void Game::generate_rand_incoming_asteroids(double density, Range<double> mass,
+                                            Range<double> momentum,
+                                            Vec2 vel_bias) {
+  if (density <= 0.0) {
+    return;
+  }
+
+  // Spawn asteroids outside of the world boundary so they float in from the
+  // edges
+  const double hwidth = cfg().world.half_width + cfg().world.padding,
+               hheight = cfg().world.half_height + cfg().world.padding;
+  const double perimeter = 4.0 * (hwidth + hheight);
+
+  const double lambda = std::max(0.0, perimeter * density);
+  std::poisson_distribution<int> count_dist(lambda);
+  const int count = count_dist(random_engine_);
+
+  std::uniform_real_distribution<double> edge_dist(0.0, perimeter);
+  for (int i = 0; i < count; ++i) {
+    double edge_pos = edge_dist(random_engine_);
+    Vec2 pos;
+    if (edge_pos < 2.0 * hwidth) {
+      pos = {-hwidth + edge_pos, hheight};
+    } else if (edge_pos < 2.0 * hwidth + 2.0 * hheight) {
+      pos = {hwidth, hheight - (edge_pos - 2.0 * hwidth)};
+    } else if (edge_pos < 4.0 * hwidth + 2.0 * hheight) {
+      pos = {hwidth - (edge_pos - 2.0 * hwidth - 2.0 * hheight), -hheight};
+    } else {
+      pos = {-hwidth, -hheight + (edge_pos - 4.0 * hwidth - 2.0 * hheight)};
+    }
+
+    generate_rand_asteroid(pos, mass, momentum, vel_bias);
+  }
 }
 
 #ifdef AST_USE_SDL2

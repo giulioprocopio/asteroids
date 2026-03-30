@@ -15,9 +15,14 @@ void add_default_asteroids(Game &game) {
 
 int main() {
   Game game;
-  // add_default_asteroids(game);
+
+  add_default_asteroids(game);
   game.generate_rand_world_asteroids(2e-6, {100.0, 10000.0}, {0.0, 20000.0},
                                      {-50.0, 0.0});
+  game.generate_rand_asteroid_cluster({3000.0, 0.0}, 150.0, 5e-4,
+                                      {100.0, 1000.0}, {0.0, 2000.0}, {PI, PI},
+                                      {-100.0, 0.0});
+
   game.set_ship();
   game.clear_ship_vicinity();
 

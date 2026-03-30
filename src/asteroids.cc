@@ -551,7 +551,8 @@ void Game::update(double dt) { space_.step(dt); }
 void Game::add_asteroid(Asteroid a) { space_.add_asteroid(std::move(a)); }
 
 void Game::generate_rand_asteroid(const Vec2 &pos, Range<double> mass,
-                                  Range<double> momentum, Vec2 vel_bias) {
+                                  Range<double> momentum, Range<double> angle,
+                                  Vec2 vel_bias) {
   const double mass_lo = std::max(mass.min, cfg().asteroid.min_mass);
   const double mass_hi = std::max(mass.max, mass_lo);
   const double momentum_lo = std::max(momentum.min, 0.0);
@@ -560,7 +561,7 @@ void Game::generate_rand_asteroid(const Vec2 &pos, Range<double> mass,
   std::uniform_real_distribution<double> mass_dist(mass_lo, mass_hi);
   std::uniform_real_distribution<double> momentum_dist(momentum_lo,
                                                        momentum_hi);
-  std::uniform_real_distribution<double> angle_dist(0.0, TWO_PI);
+  std::uniform_real_distribution<double> angle_dist(angle.min, angle.max);
 
   const double m = mass_dist(random_engine_);
 
@@ -590,7 +591,7 @@ void Game::generate_rand_asteroid(const Vec2 &pos, Range<double> mass,
 void Game::generate_rand_asteroid_cluster(const Vec2 &center, double radius,
                                           double density, Range<double> mass,
                                           Range<double> momentum,
-                                          Vec2 vel_bias) {
+                                          Range<double> angle, Vec2 vel_bias) {
   if (radius <= 0.0 || density <= 0.0) {
     return;
   }
@@ -610,19 +611,19 @@ void Game::generate_rand_asteroid_cluster(const Vec2 &center, double radius,
     const Vec2 pos{center.x + std::cos(angle_pos) * dist,
                    center.y + std::sin(angle_pos) * dist};
 
-    generate_rand_asteroid(pos, mass, momentum, vel_bias);
+    generate_rand_asteroid(pos, mass, momentum, angle, vel_bias);
   }
 }
 
 void Game::generate_rand_world_asteroids(double density, Range<double> mass,
                                          Range<double> momentum,
-                                         Vec2 vel_bias) {
+                                         Range<double> angle, Vec2 vel_bias) {
   const Vec2 center{0.0, 0.0};
   const double radius =
       std::sqrt(cfg().world.half_width * cfg().world.half_width +
                 cfg().world.half_height * cfg().world.half_height);
 
-  generate_rand_asteroid_cluster(center, radius, density, mass, momentum,
+  generate_rand_asteroid_cluster(center, radius, density, mass, momentum, angle,
                                  vel_bias);
 }
 
@@ -664,17 +665,22 @@ void Game::generate_rand_incoming_asteroids(double density, Range<double> mass,
   for (int i = 0; i < count; ++i) {
     double edge_pos = edge_dist(random_engine_);
     Vec2 pos;
+    Range<double> angle;
     if (edge_pos < 2.0 * hwidth) {
       pos = {-hwidth + edge_pos, hheight};
+      angle = {PI, TWO_PI};
     } else if (edge_pos < 2.0 * hwidth + 2.0 * hheight) {
       pos = {hwidth, hheight - (edge_pos - 2.0 * hwidth)};
+      angle = {PI / 2.0, 3.0 * PI / 2.0};
     } else if (edge_pos < 4.0 * hwidth + 2.0 * hheight) {
       pos = {hwidth - (edge_pos - 2.0 * hwidth - 2.0 * hheight), -hheight};
+      angle = {0.0, PI};
     } else {
       pos = {-hwidth, -hheight + (edge_pos - 4.0 * hwidth - 2.0 * hheight)};
+      angle = {PI / 2.0, 3.0 * PI / 2.0};
     }
 
-    generate_rand_asteroid(pos, mass, momentum, vel_bias);
+    generate_rand_asteroid(pos, mass, momentum, angle, vel_bias);
   }
 }
 

@@ -253,13 +253,16 @@ class Game {
   void add_asteroid(Asteroid a = {});
   void generate_rand_asteroid(const Vec2 &pos, Range<double> mass,
                               Range<double> momentum,
+                              Range<double> angle = {0.0, TWO_PI},
                               Vec2 vel_bias = {0.0, 0.0});
   void generate_rand_asteroid_cluster(const Vec2 &center, double radius,
                                       double density, Range<double> mass,
                                       Range<double> momentum,
+                                      Range<double> angle = {0.0, TWO_PI},
                                       Vec2 vel_bias = {0.0, 0.0});
   void generate_rand_world_asteroids(double density, Range<double> mass,
                                      Range<double> momentum,
+                                     Range<double> angle = {0.0, TWO_PI},
                                      Vec2 vel_bias = {0.0, 0.0});
   void clear_ship_vicinity(double radius = 50.0);
   void generate_rand_incoming_asteroids(double density, Range<double> mass,

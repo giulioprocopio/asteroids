@@ -188,8 +188,6 @@ void Space::add_asteroid(Asteroid a) {
   asteroids_.push_back(a);
 }
 
-void Space::set_ship(Ship s) { ship_ = s; }
-
 void Space::set_input(const InputState &input) {
   // Edge-trigger fire: queue a shot only on the transition from low to high
   if (input.fire && !input_.fire) {
@@ -197,14 +195,6 @@ void Space::set_input(const InputState &input) {
   }
   input_ = input;
 }
-
-std::span<const Asteroid> Space::asteroids() const { return asteroids_; }
-
-std::span<const Bullet> Space::bullets() const { return bullets_; }
-
-std::span<const Explosion> Space::explosions() const { return explosions_; }
-
-const Ship &Space::ship() const { return ship_; }
 
 void Space::step(double dt) {
   const double ar2 =
@@ -511,6 +501,20 @@ void Space::step(double dt) {
     }
   }
 
+  // Asteroid-ship collision
+  for (size_t i = 0; i < asteroids_.size(); ++i) {
+    if (asteroid_destroyed[i]) continue;
+    if (!asteroids_[i].active) continue;
+
+    Vec2 r = asteroids_[i].pos - ship_.pos;
+    double dist2 = dot(r, r);
+    double rad_sum = asteroids_[i].radius + cfg().ship.hitbox_radius;
+    if (dist2 > rad_sum * rad_sum) continue;
+
+    // Ship hit, callback
+    on_ship_hit_(asteroids_[i]);
+  }
+
   // Update asteroid list once per frame (after all collisions are processed)
   {
     std::vector<Asteroid> surviving;
@@ -536,19 +540,6 @@ void Space::step(double dt) {
     }
   }
 }
-
-const Space &Game::space() const { return space_; }
-
-// Zoom not implemented yet, return default zoom for now
-CameraState Game::camera() const { return {space_.ship().pos, 1.0}; }
-
-void Game::set_ship(Ship s) { space_.set_ship(s); }
-
-void Game::handle_input(const InputState &input) { space_.set_input(input); }
-
-void Game::update(double dt) { space_.step(dt); }
-
-void Game::add_asteroid(Asteroid a) { space_.add_asteroid(std::move(a)); }
 
 void Game::generate_rand_asteroid(const Vec2 &pos, Range<double> mass,
                                   Range<double> momentum, Range<double> angle,

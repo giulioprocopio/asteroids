@@ -2,6 +2,7 @@
 #define ASTEROIDS_HH
 
 #include <cmath>
+#include <functional>
 #include <random>
 #include <span>
 #include <vector>
@@ -50,6 +51,7 @@ struct ShipConfig {
 #else
   bool gravity = true;
 #endif
+  double hitbox_radius = 10.0;
 };
 
 struct BulletConfig {
@@ -212,18 +214,22 @@ struct CameraState {
 
 class Space {
  public:
-  std::span<const Asteroid> asteroids() const;
-  std::span<const Bullet> bullets() const;
-  std::span<const Explosion> explosions() const;
-  const Ship &ship() const;
+  using ShipHitCallback = std::function<void(const Asteroid &)>;
+
+  std::span<const Asteroid> asteroids() const { return asteroids_; }
+  std::span<const Bullet> bullets() const { return bullets_; }
+  std::span<const Explosion> explosions() const { return explosions_; }
+  const Ship &ship() const { return ship_; }
 
   void add_asteroid(Asteroid a);
-  void set_ship(Ship s);
+  void set_ship(Ship s) { ship_ = s; }
   void set_input(const InputState &input);
 
   // Advance the simulation by `dt` seconds (symplectic kick-drift-kick
   // integrator)
   void step(double dt);
+
+  void set_on_ship_hit(ShipHitCallback cb) { on_ship_hit_ = std::move(cb); }
 
  private:
   Ship ship_{};
@@ -237,20 +243,22 @@ class Space {
   bool fire_pending_ = false;  // Edge-triggered fire flag
   unsigned int step_counter_ = 0;
 
+  ShipHitCallback on_ship_hit_ = [](const Asteroid &) {};
+
   std::mt19937 random_engine_{std::random_device{}()};
 };
 
 class Game {
  public:
-  const Space &space() const;
-  CameraState camera() const;
+  const Space &space() const { return space_; }
+  CameraState camera() const { return {space_.ship().pos, 1.0}; }
 
-  void set_ship(Ship s = {});
+  void set_ship(Ship s = {}) { space_.set_ship(s); }
 
-  void handle_input(const InputState &input);
-  void update(double dt);
+  void handle_input(const InputState &input) { space_.set_input(input); }
+  void update(double dt) { space_.step(dt); }
 
-  void add_asteroid(Asteroid a = {});
+  void add_asteroid(Asteroid a = {}) { space_.add_asteroid(std::move(a)); }
   void generate_rand_asteroid(const Vec2 &pos, Range<double> mass,
                               Range<double> momentum,
                               Range<double> angle = {0.0, TWO_PI},
@@ -268,6 +276,10 @@ class Game {
   void generate_rand_incoming_asteroids(double density, Range<double> mass,
                                         Range<double> momentum,
                                         Vec2 vel_bias = {0.0, 0.0});
+
+  void set_on_ship_hit(Space::ShipHitCallback cb) {
+    space_.set_on_ship_hit(std::move(cb));
+  }
 
  private:
   Space space_;

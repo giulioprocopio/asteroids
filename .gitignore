@@ -1,5 +1,6 @@
 # CMake
 /build/
+/build-web/
 
 # MacOS
 .DS_Store

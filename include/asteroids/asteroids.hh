@@ -20,8 +20,8 @@
 // Config and constants
 
 #define AST_TITLE "Asteroids"
-#define AST_WINDOW_WIDTH 1280
-#define AST_WINDOW_HEIGHT 720
+#define AST_WINDOW_WIDTH 1024
+#define AST_WINDOW_HEIGHT 768
 #define AST_DEBUG 0
 
 struct WindowConfig {
@@ -42,7 +42,7 @@ struct PhysicsConfig {
 };
 
 struct ShipConfig {
-  double radius = 20.0;
+  double radius = 15.0;
   double thrust_forward = 75.0;
   double thrust_backward = 40.0;
   double rotation_speed = 3.0;
@@ -89,6 +89,17 @@ struct ExplosionConfig {
   double lifetime = 0.35;
 };
 
+struct GameConfig {
+  double score_per_momentum = 5e-4;
+#if AST_DEBUG
+  double bonus_score_threshold = 1000.0;
+#else
+  int bonus_score_threshold = 10000;
+#endif
+  double invulnerability_time = 3.0;
+  double invulnerability_blink_interval = 0.2;
+};
+
 struct RenderConfig {
   double window_units =
       1000.0;  // Number of world units that fit in the smaller window dimension
@@ -98,6 +109,13 @@ struct RenderConfig {
   int circle_segments = 24;
   int bullet_size_px = 3;
   int bullet_half_px = 1;
+#if AST_DEBUG
+  bool draw_labels = true;
+#else
+  bool draw_labels = true;
+#endif
+  int label_x = 150;  // Right aligned
+  int label_y = 40;
 };
 
 struct TimingConfig {
@@ -113,6 +131,7 @@ struct AsteroidsConfig {
   BulletConfig bullet{};
   AsteroidConfig asteroid{};
   ExplosionConfig explosion{};
+  GameConfig game{};
   RenderConfig render{};
   TimingConfig timing{};
 };
@@ -214,7 +233,8 @@ struct CameraState {
 
 class Space {
  public:
-  using ShipHitCallback = std::function<void(const Asteroid &)>;
+  using ShipHitCallback = std::function<void(const Asteroid &, bool)>;
+  using AsteroidHitCallback = std::function<void(const Asteroid &, bool)>;
 
   std::span<const Asteroid> asteroids() const { return asteroids_; }
   std::span<const Bullet> bullets() const { return bullets_; }
@@ -230,6 +250,9 @@ class Space {
   void step(double dt);
 
   void set_on_ship_hit(ShipHitCallback cb) { on_ship_hit_ = std::move(cb); }
+  void set_on_asteroid_hit(AsteroidHitCallback cb) {
+    on_asteroid_hit_ = std::move(cb);
+  }
 
  private:
   Ship ship_{};
@@ -243,20 +266,28 @@ class Space {
   bool fire_pending_ = false;  // Edge-triggered fire flag
   unsigned int step_counter_ = 0;
 
-  ShipHitCallback on_ship_hit_ = [](const Asteroid &) {};
+  ShipHitCallback on_ship_hit_ = [](const Asteroid &, bool) {};
+  AsteroidHitCallback on_asteroid_hit_ = [](const Asteroid &, bool) {};
 
   std::mt19937 random_engine_{std::random_device{}()};
 };
 
 class Game {
  public:
-  const Space &space() const { return space_; }
-  CameraState camera() const { return {space_.ship().pos, 1.0}; }
-
-  void set_ship(Ship s = {}) { space_.set_ship(s); }
+  Game();
 
   void handle_input(const InputState &input) { space_.set_input(input); }
-  void update(double dt) { space_.step(dt); }
+  void update(double dt);
+
+  const Space &space() const { return space_; }
+  CameraState camera() const { return {space_.ship().pos, 1.0}; }
+  int score() const { return score_; }
+  int lives() const { return lives_; }
+  bool game_over() const { return game_over_; }
+  bool invulnerable() const { return invulnerable_; }
+  bool should_draw_ship() const;
+
+  void set_ship(Ship s = {}) { space_.set_ship(s); }
 
   void add_asteroid(Asteroid a = {}) { space_.add_asteroid(std::move(a)); }
   void generate_rand_asteroid(const Vec2 &pos, Range<double> mass,
@@ -277,12 +308,26 @@ class Game {
                                         Range<double> momentum,
                                         Vec2 vel_bias = {0.0, 0.0});
 
-  void set_on_ship_hit(Space::ShipHitCallback cb) {
-    space_.set_on_ship_hit(std::move(cb));
-  }
+  void set_lives(int lives) { lives_ = lives; }
+  void lose_life();
+  void set_score(int score) { score_ = score; }
+  void add_score(int amount);
+
+  void handle_ship_hit(const Asteroid &a, bool destroyed);
+  void handle_asteroid_hit(const Asteroid &a, bool destroyed);
 
  private:
   Space space_;
+
+  int lives_ = 4;
+  bool invulnerable_ = false;
+  double invulnerability_timer_ = 0.0;
+  bool game_over_ = false;
+  int score_ = 0;
+  // `bonus_score` is accumulated just like `score_`, but gets reset to zero
+  // when a bonus is awarded.
+  int bonus_score_ = 0;
+
   std::mt19937 random_engine_{std::random_device{}()};
 };
 

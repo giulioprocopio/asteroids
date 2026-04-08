@@ -3,10 +3,6 @@
 
 #include "asteroids.hh"
 
-bool ship_hit = false;
-
-void on_ship_hit(const Asteroid &a) { ship_hit = true; }
-
 void add_default_asteroids(Game &game) {
   game.add_asteroid(
       {.pos = {220.0, 120.0}, .vel = {-2.5, -1.0}, .mass = 50000.0});
@@ -19,9 +15,6 @@ void add_default_asteroids(Game &game) {
 
 int main() {
   Game game;
-
-  game.set_on_ship_hit(on_ship_hit);
-
   add_default_asteroids(game);
   game.generate_rand_world_asteroids(2e-6, {100.0, 10000.0}, {0.0, 20000.0},
                                      {-50.0, 0.0});
@@ -55,11 +48,9 @@ int main() {
     while (accumulator >= asteroids_config.timing.fixed_dt) {
       const double step_density =
           border_spawn_rate * asteroids_config.timing.fixed_dt;
-      if (!ship_hit) {
-        game.generate_rand_incoming_asteroids(step_density, {100.0, 1000.0},
-                                              {15000.0, 40000.0}, {0.0, 0.0});
-        game.update(asteroids_config.timing.fixed_dt);
-      }
+      game.generate_rand_incoming_asteroids(step_density, {100.0, 1000.0},
+                                            {15000.0, 40000.0}, {0.0, 0.0});
+      game.update(asteroids_config.timing.fixed_dt);
       accumulator -= asteroids_config.timing.fixed_dt;
     }
 

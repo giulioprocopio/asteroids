@@ -155,7 +155,8 @@ std::vector<Asteroid> fragment_asteroid(const Asteroid &a, std::mt19937 &rng) {
   return fragments;
 }
 
-bool should_merge(const Asteroid &a, const Asteroid &b, std::mt19937 &rng) {
+bool asteroids_should_merge(const Asteroid &a, const Asteroid &b,
+                            std::mt19937 &rng) {
   double rel_vel = norm(a.vel - b.vel);
   double min_mass = std::min(a.mass, b.mass),
          max_mass = std::max(a.mass, b.mass);
@@ -171,11 +172,16 @@ bool should_merge(const Asteroid &a, const Asteroid &b, std::mt19937 &rng) {
   return dist(rng) < p;
 }
 
-bool should_split(const Asteroid &a, double impulse, std::mt19937 &rng) {
+bool asteroid_should_split(const Asteroid &a, double impulse,
+                           std::mt19937 &rng) {
   double p = a.stress;
   p += 1 - std::exp(-impulse / a.mass * cfg().asteroid.split_impulse_scale);
   std::uniform_real_distribution<double> dist(0.0, 1.0);
   return dist(rng) < p;
+}
+
+bool ship_should_destroy(const Asteroid &a, const Ship &s, std::mt19937 &rng) {
+  return true;
 }
 
 }  // namespace
@@ -390,11 +396,16 @@ void Space::step(double dt) {
 
       asteroids_[ai].stress += cfg().bullet.stress_on_hit;
 
-      if (should_split(asteroids_[ai], impulse, random_engine_)) {
+      if (asteroid_should_split(asteroids_[ai], impulse, random_engine_)) {
+        // Asteroid is effectively destroyed: trigger callback
+        on_asteroid_hit_(asteroids_[ai], true);
+
         std::vector<Asteroid> frags =
             fragment_asteroid(asteroids_[ai], random_engine_);
         new_asteroids.insert(new_asteroids.end(), frags.begin(), frags.end());
         asteroid_destroyed[ai] = true;
+      } else {
+        on_asteroid_hit_(asteroids_[ai], false);
       }
 
       break;  // One bullet hits one asteroid
@@ -436,7 +447,8 @@ void Space::step(double dt) {
       // Do not resolve if velocities are separating
       if (vel_along_normal > 0) continue;
 
-      if (should_merge(asteroids_[i], asteroids_[j], random_engine_)) {
+      if (asteroids_should_merge(asteroids_[i], asteroids_[j],
+                                 random_engine_)) {
         Asteroid merged;
         merged.mass = asteroids_[i].mass + asteroids_[j].mass;
         merged.vel = (asteroids_[i].vel * asteroids_[i].mass +
@@ -481,13 +493,15 @@ void Space::step(double dt) {
         asteroids_[i].pos -= normal * (overlap * 0.5);
         asteroids_[j].pos += normal * (overlap * 0.5);
 
-        if (should_split(asteroids_[i], std::abs(j_impulse), random_engine_)) {
+        if (asteroid_should_split(asteroids_[i], std::abs(j_impulse),
+                                  random_engine_)) {
           std::vector<Asteroid> frags =
               fragment_asteroid(asteroids_[i], random_engine_);
           new_asteroids.insert(new_asteroids.end(), frags.begin(), frags.end());
           asteroid_destroyed[i] = true;
         }
-        if (should_split(asteroids_[j], std::abs(j_impulse), random_engine_)) {
+        if (asteroid_should_split(asteroids_[j], std::abs(j_impulse),
+                                  random_engine_)) {
           std::vector<Asteroid> frags =
               fragment_asteroid(asteroids_[j], random_engine_);
           new_asteroids.insert(new_asteroids.end(), frags.begin(), frags.end());
@@ -511,8 +525,15 @@ void Space::step(double dt) {
     double rad_sum = asteroids_[i].radius + cfg().ship.hitbox_radius;
     if (dist2 > rad_sum * rad_sum) continue;
 
+    // Fragment the asteroid
+    std::vector<Asteroid> frags =
+        fragment_asteroid(asteroids_[i], random_engine_);
+    new_asteroids.insert(new_asteroids.end(), frags.begin(), frags.end());
+    asteroid_destroyed[i] = true;
+
     // Ship hit, callback
-    on_ship_hit_(asteroids_[i]);
+    on_ship_hit_(asteroids_[i],
+                 ship_should_destroy(asteroids_[i], ship_, random_engine_));
   }
 
   // Update asteroid list once per frame (after all collisions are processed)
@@ -539,6 +560,39 @@ void Space::step(double dt) {
       add_asteroid(a);
     }
   }
+}
+
+Game::Game() {
+  space_.set_on_ship_hit([this](const Asteroid &a, bool destroyed) {
+    handle_ship_hit(a, destroyed);
+  });
+  space_.set_on_asteroid_hit([this](const Asteroid &a, bool destroyed) {
+    handle_asteroid_hit(a, destroyed);
+  });
+}
+
+void Game::update(double dt) {
+  if (!game_over_) {
+    space_.step(dt);
+
+    if (invulnerable_) {
+      invulnerability_timer_ -= dt;
+      if (invulnerability_timer_ <= 0.0) {
+        invulnerable_ = false;
+      }
+    }
+  }
+}
+
+bool Game::should_draw_ship() const {
+  if (!invulnerable_) {
+    return true;
+  }
+
+  // Blink the ship during invulnerability
+  double phase = std::fmod(invulnerability_timer_,
+                           cfg().game.invulnerability_blink_interval * 2);
+  return phase < cfg().game.invulnerability_blink_interval;
 }
 
 void Game::generate_rand_asteroid(const Vec2 &pos, Range<double> mass,
@@ -675,6 +729,43 @@ void Game::generate_rand_incoming_asteroids(double density, Range<double> mass,
   }
 }
 
+void Game::lose_life() {
+#if !AST_DEBUG
+  lives_ = std::max(0, lives_ - 1);
+
+  if (lives_ == 0) {
+    game_over_ = true;
+  } else {
+    invulnerable_ = true;
+    invulnerability_timer_ = cfg().game.invulnerability_time;
+  }
+#endif
+}
+
+void Game::add_score(int amount) {
+  score_ += amount;
+  bonus_score_ += amount;
+
+  while (bonus_score_ >= cfg().game.bonus_score_threshold) {
+    lives_ += 1;
+    bonus_score_ -= cfg().game.bonus_score_threshold;
+  }
+}
+
+void Game::handle_ship_hit(const Asteroid &a, bool destroyed) {
+  if (destroyed && !invulnerable_) {
+    lose_life();
+  }
+}
+
+void Game::handle_asteroid_hit(const Asteroid &a, bool destroyed) {
+  if (destroyed) {
+    int amount = static_cast<uint64_t>(
+        std::lround(a.mass * norm(a.vel) * cfg().game.score_per_momentum));
+    add_score(amount);
+  }
+}
+
 #ifdef AST_USE_SDL2
 
 struct Renderer::State {
@@ -800,6 +891,320 @@ void draw_ship(SDL_Renderer *renderer, int cx, int cy, double angle,
   SDL_RenderDrawLine(renderer, lx, ly, bx, by);
   SDL_RenderDrawLine(renderer, bx, by, rx, ry);
   SDL_RenderDrawLine(renderer, rx, ry, fx, fy);
+}
+
+// 6x8 grid vector font for digits 0-9 and letters A-Z (defined as line
+// segments)
+const int VECTOR_FONT_CHAR_WIDTH = 6, VECTOR_FONT_CHAR_HEIGHT = 8,
+          VECTOR_FONT_WORD_SPACING = 6;
+const std::unordered_map<int, std::vector<std::array<int, 4>>> VECTOR_FONT = {
+    {' ', {}},
+    // Numbers
+    {'0',
+     {
+         {0, 0, 4, 0},
+         {4, 0, 4, 6},
+         {4, 6, 0, 6},
+         {0, 6, 0, 0},
+     }},
+    {'1',
+     {
+         {2, 0, 2, 6},
+     }},
+    {'2',
+     {
+         {0, 0, 4, 0},
+         {4, 0, 4, 3},
+         {4, 3, 0, 3},
+         {0, 3, 0, 6},
+         {0, 6, 4, 6},
+     }},
+    {'3',
+     {
+         {0, 0, 4, 0},
+         {4, 0, 4, 6},
+         {4, 6, 0, 6},
+         {0, 3, 4, 3},
+     }},
+    {'4',
+     {
+         {0, 0, 0, 3},
+         {0, 3, 4, 3},
+         {4, 0, 4, 6},
+     }},
+    {'5',
+     {
+         {4, 0, 0, 0},
+         {0, 0, 0, 3},
+         {0, 3, 4, 3},
+         {4, 3, 4, 6},
+         {4, 6, 0, 6},
+     }},
+    {'6',
+     {
+         {4, 0, 0, 0},
+         {0, 0, 0, 6},
+         {0, 6, 4, 6},
+         {4, 6, 4, 3},
+         {4, 3, 0, 3},
+     }},
+    {'7',
+     {
+         {0, 0, 4, 0},
+         {4, 0, 4, 6},
+     }},
+    {'8',
+     {
+         {0, 0, 4, 0},
+         {4, 0, 4, 6},
+         {4, 6, 0, 6},
+         {0, 6, 0, 0},
+         {0, 3, 4, 3},
+     }},
+    {'9',
+     {
+         {4, 6, 4, 0},
+         {4, 0, 0, 0},
+         {0, 0, 0, 3},
+         {0, 3, 4, 3},
+     }},
+    // Letters
+    {'A',
+     {
+         {0, 6, 0, 0},
+         {0, 0, 4, 0},
+         {4, 0, 4, 6},
+         {0, 3, 4, 3},
+     }},
+    {'B',
+     {
+         {0, 0, 0, 6},
+         {0, 6, 3, 6},
+         {3, 6, 4, 5},
+         {4, 5, 4, 4},
+         {4, 4, 3, 3},
+         {3, 3, 0, 3},
+         {3, 3, 4, 2},
+         {4, 2, 4, 1},
+         {4, 1, 3, 0},
+         {3, 0, 0, 0},
+     }},
+    {'C',
+     {
+         {4, 0, 0, 0},
+         {0, 0, 0, 6},
+         {0, 6, 4, 6},
+     }},
+    {'D',
+     {
+         {0, 0, 0, 6},
+         {0, 6, 3, 6},
+         {3, 6, 4, 5},
+         {4, 5, 4, 1},
+         {4, 1, 3, 0},
+         {3, 0, 0, 0},
+     }},
+    {'E',
+     {
+         {4, 0, 0, 0},
+         {0, 0, 0, 6},
+         {0, 6, 4, 6},
+         {0, 3, 3, 3},
+     }},
+    {'F',
+     {
+         {4, 0, 0, 0},
+         {0, 0, 0, 6},
+         {0, 3, 3, 3},
+     }},
+    {'G',
+     {
+         {4, 0, 0, 0},
+         {0, 0, 0, 6},
+         {0, 6, 4, 6},
+         {4, 6, 4, 3},
+         {4, 3, 2, 3},
+     }},
+    {'H',
+     {
+         {0, 0, 0, 6},
+         {4, 0, 4, 6},
+         {0, 3, 4, 3},
+     }},
+    {'I',
+     {
+         {0, 0, 4, 0},
+         {2, 0, 2, 6},
+         {0, 6, 4, 6},
+     }},
+    {'J',
+     {
+         {4, 0, 4, 6},
+         {4, 6, 0, 6},
+         {0, 6, 0, 4},
+     }},
+    {'K',
+     {
+         {0, 0, 0, 6},
+         {4, 0, 0, 3},
+         {0, 3, 4, 6},
+     }},
+    {'L',
+     {
+         {0, 0, 0, 6},
+         {0, 6, 4, 6},
+     }},
+    {'M',
+     {
+         {0, 6, 0, 0},
+         {0, 0, 2, 2},
+         {2, 2, 4, 0},
+         {4, 0, 4, 6},
+     }},
+    {'N',
+     {
+         {0, 6, 0, 0},
+         {0, 0, 4, 6},
+         {4, 6, 4, 0},
+     }},
+    {'O',
+     {
+         {0, 0, 4, 0},
+         {4, 0, 4, 6},
+         {4, 6, 0, 6},
+         {0, 6, 0, 0},
+     }},
+    {'P',
+     {
+         {0, 6, 0, 0},
+         {0, 0, 4, 0},
+         {4, 0, 4, 3},
+         {4, 3, 0, 3},
+     }},
+    {'Q',
+     {
+         {0, 0, 4, 0},
+         {4, 0, 4, 6},
+         {4, 6, 0, 6},
+         {0, 6, 0, 0},
+         {2, 4, 4, 6},
+     }},
+    {'R',
+     {
+         {0, 6, 0, 0},
+         {0, 0, 4, 0},
+         {4, 0, 4, 3},
+         {4, 3, 0, 3},
+         {0, 3, 4, 6},
+     }},
+    {'S',
+     {
+         {4, 0, 0, 0},
+         {0, 0, 0, 3},
+         {0, 3, 4, 3},
+         {4, 3, 4, 6},
+         {4, 6, 0, 6},
+     }},
+    {'T',
+     {
+         {0, 0, 4, 0},
+         {2, 0, 2, 6},
+     }},
+    {'U',
+     {
+         {0, 0, 0, 6},
+         {0, 6, 4, 6},
+         {4, 6, 4, 0},
+     }},
+    {'V',
+     {
+         {0, 0, 2, 6},
+         {2, 6, 4, 0},
+     }},
+    {'W',
+     {
+         {0, 0, 0, 6},
+         {0, 6, 2, 4},
+         {2, 4, 4, 6},
+         {4, 6, 4, 0},
+     }},
+    {'X',
+     {
+         {0, 0, 4, 6},
+         {4, 0, 0, 6},
+     }},
+    {'Y',
+     {
+         {0, 0, 2, 3},
+         {4, 0, 2, 3},
+         {2, 3, 2, 6},
+     }},
+    {'Z',
+     {
+         {0, 0, 4, 0},
+         {4, 0, 0, 6},
+         {0, 6, 4, 6},
+     }},
+};
+
+int str_vector_font_len(const std::string &text) {
+  int len = 0;
+  for (char c : text) {
+    if (c == ' ') {
+      len += VECTOR_FONT_WORD_SPACING;
+    } else {
+      len += VECTOR_FONT_CHAR_WIDTH;
+    }
+  }
+  return len;
+}
+
+void draw_vector_text(SDL_Renderer *renderer, const std::string &text, int x,
+                      int y, int scale, bool align_center = false,
+                      bool align_right = false) {
+  if (align_center) {
+    x -= (str_vector_font_len(text) * scale) / 2;
+  } else if (align_right) {
+    x -= str_vector_font_len(text) * scale;
+  }
+
+  int cur_x = x;
+  for (char c : text) {
+    if constexpr (VECTOR_FONT_WORD_SPACING != VECTOR_FONT_CHAR_WIDTH) {
+      if (c == ' ') {
+        cur_x += VECTOR_FONT_WORD_SPACING * scale;  // Space width
+        continue;
+      }
+    }
+    // Else, let space be handled by looking up in the font map
+
+    auto it = VECTOR_FONT.find(c);
+    if (it != VECTOR_FONT.end()) {
+      for (const auto &seg : it->second) {
+        SDL_RenderDrawLine(renderer, cur_x + seg[0] * scale, y + seg[1] * scale,
+                           cur_x + seg[2] * scale, y + seg[3] * scale);
+      }
+    }
+    cur_x += VECTOR_FONT_CHAR_WIDTH *
+             scale;  // Letter gaps are already accounted for in the segments,
+                     // so just move by char width
+  }
+}
+
+void draw_score(SDL_Renderer *renderer, int score, int x, int y, int scale) {
+  std::string score_str = std::to_string(score);
+  draw_vector_text(renderer, score_str, x, y, scale, false, true);
+}
+
+void draw_lives(SDL_Renderer *renderer, int lives, int x, int y,
+                double radius) {
+  int r = static_cast<int>(std::lround(radius));
+  const int sy = y + 2 * r;
+  int sx = x - r;
+  for (int i = 0; i < lives; ++i) {
+    draw_ship(renderer, sx, sy, PI / 2.0, radius);
+    sx -= 2 * r;
+  }
 }
 
 }  // namespace
@@ -942,11 +1347,17 @@ void Renderer::render(const Game &game) {
   }
 
   // Ship
-  {
+  if (game.should_draw_ship()) {
     const auto [x, y] = to_screen(ship.pos);
     SDL_SetRenderDrawColor(state_->renderer, 255, 255, 255, 255);
     draw_ship(state_->renderer, x, y, ship.angle, cfg().ship.radius * scale);
   }
+
+  draw_score(state_->renderer, game.score(), cfg().render.label_x,
+             cfg().render.label_y, 3);
+  draw_lives(state_->renderer, game.lives() - 1, cfg().render.label_x,
+             cfg().render.label_y + 2 * VECTOR_FONT_CHAR_HEIGHT,
+             static_cast<int>(std::lround(cfg().ship.radius * scale)));
 
   SDL_RenderPresent(state_->renderer);
 }

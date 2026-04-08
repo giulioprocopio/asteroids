@@ -141,12 +141,12 @@ extern AsteroidsConfig asteroids_config;
 // Math utilities
 
 #ifndef M_PI
-#define M_PI 3.14159265358979323846
+inline constexpr double M_PI = 3.14159265358979323846;
 #endif
-#define PI M_PI
-#define TWO_PI (2.0 * M_PI)
+inline constexpr double PI = M_PI;
+inline constexpr double TWO_PI = 2.0 * M_PI;
 
-#define EPS 1e-6
+inline constexpr double EPS = 1e-6;
 
 struct Vec2 {
   double x, y;
@@ -195,16 +195,19 @@ struct Asteroid {
   int id = 0;
   double stress = 0.0;
   bool active = true;
+  bool destroyed = false;
 };
 
 struct Ship {
   Vec2 pos, vel;
   double angle = 0.0;  // Radians, counterclockwise from positive x-axis
+  bool destroyed = false;
 };
 
 struct Bullet {
   Vec2 pos, vel;
   double lifetime = 3.0;  // Seconds remaining before despawn
+  bool destroyed = false;
 };
 
 struct Explosion {

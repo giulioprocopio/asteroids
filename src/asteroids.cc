@@ -191,7 +191,7 @@ void Space::add_asteroid(Asteroid a) {
   if (a.id <= 0) {
     a.id = next_asteroid_id_++;
   }
-  asteroids_.push_back(a);
+  asteroids_.push_back(std::move(a));
 }
 
 void Space::set_input(const InputState &input) {
@@ -367,20 +367,18 @@ void Space::step(double dt) {
                                                std::numeric_limits<int>::max());
 
   // Bullet-asteroid collision
-  std::vector<bool> bullet_hit(bullets_.size(), false);
-  std::vector<bool> asteroid_destroyed(asteroids_.size(), false);
   std::vector<Asteroid> new_asteroids;
 
   for (size_t bi = 0; bi < bullets_.size(); ++bi) {
     for (size_t ai = 0; ai < asteroids_.size(); ++ai) {
-      if (asteroid_destroyed[ai]) continue;
+      if (asteroids_[ai].destroyed) continue;
       if (!asteroids_[ai].active) continue;
 
       // Check if bullet is within asteroid radius
       const Vec2 d = bullets_[bi].pos - asteroids_[ai].pos;
       const double r = asteroids_[ai].radius;
       if (dot(d, d) > r * r) continue;
-      bullet_hit[bi] = true;
+      bullets_[bi].destroyed = true;
 
       // Surface impact point in the direction of the incoming bullet
       const double dn = std::max(norm(d), EPS);
@@ -403,7 +401,7 @@ void Space::step(double dt) {
         std::vector<Asteroid> frags =
             fragment_asteroid(asteroids_[ai], random_engine_);
         new_asteroids.insert(new_asteroids.end(), frags.begin(), frags.end());
-        asteroid_destroyed[ai] = true;
+        asteroids_[ai].destroyed = true;
       } else {
         on_asteroid_hit_(asteroids_[ai], false);
       }
@@ -413,23 +411,14 @@ void Space::step(double dt) {
   }
 
   // Remove hit bullets
-  {
-    std::vector<Bullet> surviving;
-    surviving.reserve(bullets_.size());
-    for (size_t i = 0; i < bullets_.size(); ++i) {
-      if (!bullet_hit[i]) {
-        surviving.push_back(bullets_[i]);
-      }
-    }
-    bullets_ = std::move(surviving);
-  }
+  std::erase_if(bullets_, [](const Bullet &b) { return b.destroyed; });
 
   // Asteroid-asteroid collision
   for (size_t i = 0; i < asteroids_.size(); ++i) {
-    if (asteroid_destroyed[i]) continue;
+    if (asteroids_[i].destroyed) continue;
     if (!asteroids_[i].active) continue;
     for (size_t j = i + 1; j < asteroids_.size(); ++j) {
-      if (asteroid_destroyed[j]) continue;
+      if (asteroids_[j].destroyed) continue;
       if (!asteroids_[j].active) continue;
 
       Vec2 r = asteroids_[j].pos - asteroids_[i].pos;
@@ -467,8 +456,8 @@ void Space::step(double dt) {
 
         merged = normalize_asteroid(merged);
 
-        asteroid_destroyed[i] = true;
-        asteroid_destroyed[j] = true;
+        asteroids_[i].destroyed = true;
+        asteroids_[j].destroyed = true;
         new_asteroids.push_back(merged);
         break;  // `i`-th asteroid is destroyed, break out of `j` loop
       } else {
@@ -498,17 +487,17 @@ void Space::step(double dt) {
           std::vector<Asteroid> frags =
               fragment_asteroid(asteroids_[i], random_engine_);
           new_asteroids.insert(new_asteroids.end(), frags.begin(), frags.end());
-          asteroid_destroyed[i] = true;
+          asteroids_[i].destroyed = true;
         }
         if (asteroid_should_split(asteroids_[j], std::abs(j_impulse),
                                   random_engine_)) {
           std::vector<Asteroid> frags =
               fragment_asteroid(asteroids_[j], random_engine_);
           new_asteroids.insert(new_asteroids.end(), frags.begin(), frags.end());
-          asteroid_destroyed[j] = true;
+          asteroids_[j].destroyed = true;
         }
 
-        if (asteroid_destroyed[i]) {
+        if (asteroids_[i].destroyed) {
           break;  // `i` is destroyed, break out of `j` loop
         }
       }
@@ -517,7 +506,7 @@ void Space::step(double dt) {
 
   // Asteroid-ship collision
   for (size_t i = 0; i < asteroids_.size(); ++i) {
-    if (asteroid_destroyed[i]) continue;
+    if (asteroids_[i].destroyed) continue;
     if (!asteroids_[i].active) continue;
 
     Vec2 r = asteroids_[i].pos - ship_.pos;
@@ -529,7 +518,7 @@ void Space::step(double dt) {
     std::vector<Asteroid> frags =
         fragment_asteroid(asteroids_[i], random_engine_);
     new_asteroids.insert(new_asteroids.end(), frags.begin(), frags.end());
-    asteroid_destroyed[i] = true;
+    asteroids_[i].destroyed = true;
 
     // Ship hit, callback
     on_ship_hit_(asteroids_[i],
@@ -538,16 +527,13 @@ void Space::step(double dt) {
 
   // Update asteroid list once per frame (after all collisions are processed)
   {
-    std::vector<Asteroid> surviving;
-    surviving.reserve(asteroids_.size() + new_asteroids.size());
     for (size_t i = 0; i < asteroids_.size(); ++i) {
-      if (!asteroid_destroyed[i]) {
+      if (!asteroids_[i].destroyed) {
         // Natural stress healing over time
         if (asteroids_[i].active) {
           asteroids_[i].stress = std::max(
               0.0, asteroids_[i].stress - cfg().asteroid.stress_decay * dt);
         }
-        surviving.push_back(asteroids_[i]);
       } else {
         // Spawn an explosion for newly destroyed asteroids
         explosions_.push_back({asteroids_[i].pos, asteroids_[i].radius, 0.0,
@@ -555,9 +541,10 @@ void Space::step(double dt) {
       }
     }
 
-    asteroids_ = std::move(surviving);
-    for (const auto &a : new_asteroids) {
-      add_asteroid(a);
+    std::erase_if(asteroids_, [](const Asteroid &a) { return a.destroyed; });
+
+    for (Asteroid &a : new_asteroids) {
+      add_asteroid(std::move(a));
     }
   }
 }

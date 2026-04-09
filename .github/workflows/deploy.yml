@@ -24,6 +24,11 @@ jobs:
       - name: Setup Emscripten
         uses: emscripten-core/setup-emsdk@v15
 
+      - name: Install CMake
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake
+
       - name: Build web version
         run: make build-web
 

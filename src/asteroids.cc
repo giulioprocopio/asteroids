@@ -799,6 +799,34 @@ void draw_circle_outline(SDL_Renderer *renderer, int cx, int cy, int r) {
   }
 }
 
+void draw_world_bounds(SDL_Renderer *renderer, int tlx, int tly, int brx,
+                       int bry) {
+  SDL_Rect bounds{
+      .x = std::min(tlx, brx),
+      .y = std::min(tly, bry),
+      .w = std::abs(brx - tlx),
+      .h = std::abs(bry - tly),
+  };
+
+  SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
+
+  const int step = cfg().render.bound_dash + cfg().render.bound_gap;
+
+  for (int x = bounds.x; x < bounds.x + bounds.w; x += step) {
+    const int x2 = std::min(x + cfg().render.bound_dash, bounds.x + bounds.w);
+    SDL_RenderDrawLine(renderer, x, bounds.y, x2, bounds.y);
+    SDL_RenderDrawLine(renderer, x, bounds.y + bounds.h, x2,
+                       bounds.y + bounds.h);
+  }
+
+  for (int y = bounds.y; y < bounds.y + bounds.h; y += step) {
+    const int y2 = std::min(y + cfg().render.bound_dash, bounds.y + bounds.h);
+    SDL_RenderDrawLine(renderer, bounds.x, y, bounds.x, y2);
+    SDL_RenderDrawLine(renderer, bounds.x + bounds.w, y, bounds.x + bounds.w,
+                       y2);
+  }
+}
+
 const std::vector<Vec2> &get_or_create_asteroid_shape(
     std::unordered_map<int, std::vector<Vec2>> &shapes, int id) {
   const int stable_id = std::max(1, id);
@@ -1304,29 +1332,7 @@ void Renderer::render(const Game &game) {
         to_screen({-cfg().world.half_width, cfg().world.half_height});
     const auto [brx, bry] =
         to_screen({cfg().world.half_width, -cfg().world.half_height});
-    SDL_Rect bounds{
-        .x = std::min(tlx, brx),
-        .y = std::min(tly, bry),
-        .w = std::abs(brx - tlx),
-        .h = std::abs(bry - tly),
-    };
-    SDL_SetRenderDrawColor(state_->renderer, 255, 255, 255, 255);
-
-    const int step = cfg().render.bound_dash + cfg().render.bound_gap;
-
-    for (int x = bounds.x; x < bounds.x + bounds.w; x += step) {
-      const int x2 = std::min(x + cfg().render.bound_dash, bounds.x + bounds.w);
-      SDL_RenderDrawLine(state_->renderer, x, bounds.y, x2, bounds.y);
-      SDL_RenderDrawLine(state_->renderer, x, bounds.y + bounds.h, x2,
-                         bounds.y + bounds.h);
-    }
-
-    for (int y = bounds.y; y < bounds.y + bounds.h; y += step) {
-      const int y2 = std::min(y + cfg().render.bound_dash, bounds.y + bounds.h);
-      SDL_RenderDrawLine(state_->renderer, bounds.x, y, bounds.x, y2);
-      SDL_RenderDrawLine(state_->renderer, bounds.x + bounds.w, y,
-                         bounds.x + bounds.w, y2);
-    }
+    draw_world_bounds(state_->renderer, tlx, tly, brx, bry);
   }
 
   // Asteroids

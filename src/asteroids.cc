@@ -1249,6 +1249,10 @@ void draw_lives(SDL_Renderer *renderer, int lives, int x, int y,
   }
 }
 
+void draw_game_over(SDL_Renderer *renderer, int x, int y, int scale) {
+  draw_vector_text(renderer, "GAME OVER", x, y, scale, true);
+}
+
 }  // namespace
 
 Renderer::Renderer(int window_width, int window_height) {
@@ -1379,6 +1383,10 @@ void Renderer::render(const Game &game) {
   draw_lives(state_->renderer, game.lives() - 1, cfg().render.label_x,
              cfg().render.label_y + 2 * VECTOR_FONT_CHAR_HEIGHT,
              static_cast<int>(std::lround(cfg().ship.radius * scale)));
+
+  if (game.game_over()) {
+    draw_game_over(state_->renderer, width / 2, height / 3, 3);
+  }
 
   SDL_RenderPresent(state_->renderer);
 }

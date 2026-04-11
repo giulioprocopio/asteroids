@@ -859,25 +859,52 @@ void draw_asteroid_polygon(SDL_Renderer *renderer, int cx, int cy, int r,
 }
 
 void draw_ship(SDL_Renderer *renderer, int cx, int cy, double angle,
-               double radius) {
-  const double ac = std::cos(angle),
-               as = std::sin(angle);  // Axis unit vector
-  const double wc = std::cos(angle + 0.75 * PI),
-               ws = std::sin(angle + 0.75 * PI);  // Left wing unit vector
+               double radius, bool draw_propulsion) {
+  const double ac = std::cos(angle), as = std::sin(angle);
 
-  const int fx = cx + static_cast<int>(std::lround(ac * radius));
-  const int fy = cy - static_cast<int>(std::lround(as * radius));
-  const int bx = cx - static_cast<int>(std::lround(ac * radius * 0.5));
-  const int by = cy + static_cast<int>(std::lround(as * radius * 0.5));
-  const int lx = cx + static_cast<int>(std::lround(wc * radius));
-  const int ly = cy - static_cast<int>(std::lround(ws * radius));
-  const int rx = cx - static_cast<int>(std::lround(ws * radius));
-  const int ry = cy - static_cast<int>(std::lround(wc * radius));
+  // Derived from original Asteroids ship vector tables
+  const std::array<Vec2, 5> pts = {{
+      {1.0, 0.0},
+      {-0.9, 0.55},
+      {-0.55, 0.18},
+      {-0.55, -0.18},
+      {-0.9, -0.55},
+  }};
 
-  SDL_RenderDrawLine(renderer, fx, fy, lx, ly);
-  SDL_RenderDrawLine(renderer, lx, ly, bx, by);
-  SDL_RenderDrawLine(renderer, bx, by, rx, ry);
-  SDL_RenderDrawLine(renderer, rx, ry, fx, fy);
+  std::array<std::pair<int, int>, 5> rpts;
+  for (size_t i = 0; i < pts.size(); ++i) {
+    const double px = pts[i].x * radius;
+    const double py = pts[i].y * radius;
+    rpts[i].first = cx + static_cast<int>(std::lround(px * ac - py * as));
+    rpts[i].second = cy - static_cast<int>(std::lround(px * as + py * ac));
+  }
+
+  for (size_t i = 0; i < rpts.size(); ++i) {
+    const auto &p0 = rpts[i];
+    const auto &p1 = rpts[(i + 1) % rpts.size()];
+    SDL_RenderDrawLine(renderer, p0.first, p0.second, p1.first, p1.second);
+  }
+
+  if (!draw_propulsion) {
+    return;
+  }
+
+  const std::array<Vec2, 3> flame = {{
+      {-0.58, 0.14},
+      {-1.24, 0.0},
+      {-0.58, -0.14},
+  }};
+  std::array<std::pair<int, int>, 3> fpts;
+  for (size_t i = 0; i < flame.size(); ++i) {
+    const double px = flame[i].x * radius;
+    const double py = flame[i].y * radius;
+    fpts[i].first = cx + static_cast<int>(std::lround(px * ac - py * as));
+    fpts[i].second = cy - static_cast<int>(std::lround(px * as + py * ac));
+  }
+  SDL_RenderDrawLine(renderer, fpts[0].first, fpts[0].second, fpts[1].first,
+                     fpts[1].second);
+  SDL_RenderDrawLine(renderer, fpts[1].first, fpts[1].second, fpts[2].first,
+                     fpts[2].second);
 }
 
 // 6x8 grid vector font for digits 0-9 and letters A-Z (defined as line
@@ -1189,7 +1216,7 @@ void draw_lives(SDL_Renderer *renderer, int lives, int x, int y,
   const int sy = y + 2 * r;
   int sx = x - r;
   for (int i = 0; i < lives; ++i) {
-    draw_ship(renderer, sx, sy, PI / 2.0, radius);
+    draw_ship(renderer, sx, sy, PI / 2.0, radius, false);
     sx -= 2 * r;
   }
 }
@@ -1337,7 +1364,8 @@ void Renderer::render(const Game &game) {
   if (game.should_draw_ship()) {
     const auto [x, y] = to_screen(ship.pos);
     SDL_SetRenderDrawColor(state_->renderer, 255, 255, 255, 255);
-    draw_ship(state_->renderer, x, y, ship.angle, cfg().ship.radius * scale);
+    draw_ship(state_->renderer, x, y, ship.angle, cfg().ship.radius * scale,
+              space.input().thrust_forward);
   }
 
   draw_score(state_->renderer, game.score(), cfg().render.label_x,

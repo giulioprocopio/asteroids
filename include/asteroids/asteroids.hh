@@ -243,6 +243,7 @@ class Space {
   std::span<const Bullet> bullets() const { return bullets_; }
   std::span<const Explosion> explosions() const { return explosions_; }
   const Ship &ship() const { return ship_; }
+  const InputState &input() const { return input_; }
 
   void add_asteroid(Asteroid a);
   void set_ship(Ship s) { ship_ = s; }

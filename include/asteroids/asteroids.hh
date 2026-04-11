@@ -37,7 +37,7 @@ struct WorldConfig {
 };
 
 struct PhysicsConfig {
-  double gravity = 20.0;
+  double gravity = 30.0;
   double softening = 1.0;
 };
 
@@ -200,7 +200,7 @@ struct Asteroid {
 
 struct Ship {
   Vec2 pos, vel;
-  double angle = 0.0;  // Radians, counterclockwise from positive x-axis
+  double angle = PI / 2;  // Radians, counterclockwise from positive x-axis
   bool destroyed = false;
 };
 
